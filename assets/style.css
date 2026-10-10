@@ -36,7 +36,7 @@ header{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.97);backdro
 .btn.ghost,.btn.glass{background:var(--green);border-color:var(--green);color:#fff;box-shadow:0 8px 20px rgba(37,184,90,.20)}
 .btn.ghost:hover,.btn.glass:hover{background:var(--green2);border-color:var(--green2);transform:translateY(-1px)}
 .btn.full{width:100%;margin-top:10px}
-.hero{position:relative;color:#fff;padding:86px 0;background-image:linear-gradient(90deg,rgba(28,33,36,.90) 0%,rgba(28,33,36,.77) 48%,rgba(28,33,36,.40) 100%),url('https://assainstalaciones.es/imagenesweb/slide1.png');background-size:cover;background-position:center;background-repeat:no-repeat}
+.hero{position:relative;color:#fff;padding:86px 0;background-image:linear-gradient(90deg,rgba(28,33,36,.90) 0%,rgba(28,33,36,.77) 48%,rgba(28,33,36,.40) 100%),url('/assets/photos/assa-portada.webp');background-size:cover;background-position:center;background-repeat:no-repeat}
 .hero:after{content:"";position:absolute;inset:auto 0 0 0;height:5px;background:linear-gradient(90deg,var(--teal),var(--orange),var(--green))}
 .hero .wrap{position:relative;z-index:1}
 .hero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:42px;align-items:center}
@@ -91,3 +91,8 @@ footer{background:#252b2f;color:#d7dcde;padding:54px 0 26px;border-top:5px solid
 @media(max-width:980px){.header-inner nav{display:none}.hero-grid,.content-grid,.two-col,.section-title,.footer-grid{grid-template-columns:1fr;display:grid}.proof-grid{grid-template-columns:1fr 1fr}.service-cards{grid-template-columns:1fr 1fr}.work-grid{grid-template-columns:1fr 1fr}.work-grid .wide{grid-column:1/-1}.side-card{position:static}.hero-photo img{height:430px}}
 @media(max-width:640px){.wrap{padding:0 16px}.topbar-inner{display:grid;gap:5px}.topbar-inner div{gap:12px}.brand img{width:125px}.header-cta .ghost{display:none}.hero{padding:58px 0;background-position:58% center}.section{padding:58px 0}.service-cards,.work-grid,.proof-grid,.check-grid,.gallery{grid-template-columns:1fr}.work-grid .wide{grid-column:auto}.work-grid img,.work-grid .wide img,.gallery img{height:240px}.hero-photo img{height:360px}.service-photo{height:300px}.urgent-float,.wa-float{right:12px}.urgent-float{bottom:72px}.wa-float{bottom:14px}.service-thumb{height:170px}}
 @media(max-width:700px){.value-grid{grid-template-columns:1fr}.brand-panel img,.service-brand-panel img{width:210px;height:170px}}
+
+/* Accessible mobile navigation and service details; retain the existing design. */
+.mobile-menu{display:none}.service-help{margin-top:38px}.service-help h3{margin-top:24px;font-size:20px}.related-links a{text-decoration:underline;color:var(--teal)}
+@media(max-width:980px){.mobile-menu{display:block;margin-left:auto}.mobile-menu summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:800;padding:8px}.mobile-menu nav{display:grid;position:absolute;top:100%;left:16px;right:16px;max-height:65vh;overflow:auto;background:#fff;padding:16px;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);z-index:40}.mobile-menu:not([open]) nav{display:none}.mobile-menu nav a{display:block;min-height:44px;padding:9px 12px}.header-inner{gap:12px}.header-cta{margin-left:auto}}
+@media(max-width:380px){.brand img{width:105px}.header-cta .btn{padding:0 12px}.header-inner{gap:6px}}
