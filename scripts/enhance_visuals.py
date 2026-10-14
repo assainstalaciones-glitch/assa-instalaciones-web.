@@ -1,5 +1,6 @@
 """Progressive visual layer over the approved corporate pages. Run after build_site.py.
 Requires beautifulsoup4 and Pillow. Never changes routes, titles, H1 or descriptions.
+Then run refine_current.py to retain the subsequent incremental refinements.
 """
 from pathlib import Path
 from bs4 import BeautifulSoup
