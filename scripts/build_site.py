@@ -116,3 +116,7 @@ write('privacidad','Información sobre privacidad | ASSA Instalaciones','Cómo f
 (ROOT/'sitemap.xml').write_text('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'+''.join('<url><loc>'+u+'</loc></url>\n' for u in PAGES)+'</urlset>\n')
 (ROOT/'robots.txt').write_text('User-agent: *\nAllow: /\nSitemap: '+BASE+'/sitemap.xml\n')
 print(f'Generadas {len(PAGES)} páginas')
+
+# Preserve the progressive visual layer on every future rebuild.
+import runpy
+runpy.run_path(str(ROOT / "scripts/enhance_visuals.py"))
