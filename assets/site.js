@@ -37,6 +37,7 @@
   }
   const form = document.getElementById('request-form');
   if (!form) return;
+  form.querySelector('button[type=submit]').disabled = false;
   const params = new URLSearchParams(window.location.search);
   const service = params.get('servicio');
   if (service) {
@@ -53,14 +54,22 @@
     link.removeAttribute('href');
     document.getElementById('form-status').textContent = 'Has cambiado la consulta. Pulsa «Preparar mensaje en WhatsApp» para actualizarla.';
   };
-  form.addEventListener('input', invalidateMessage);
+  form.addEventListener('input', event => {
+    if (event.target.setCustomValidity) event.target.setCustomValidity('');
+    invalidateMessage();
+  });
   form.addEventListener('change', invalidateMessage);
   form.addEventListener('submit', event => {
     event.preventDefault();
     if (!form.reportValidity()) return;
     const get = name => String(form.elements[name].value).trim();
-    if (!get('localidad') || get('mensaje').length < 10) {
-      document.getElementById('form-status').textContent = 'Indica la localidad y describe el trabajo con al menos 10 caracteres.';
+    const invalid = !get('localidad') ? form.elements.localidad : get('mensaje').length < 10 ? form.elements.mensaje : null;
+    if (invalid) {
+      const message = invalid === form.elements.localidad ? 'Indica la localidad de la instalación.' : 'Describe el trabajo con al menos 10 caracteres, sin contar espacios al principio o al final.';
+      invalid.setCustomValidity(message);
+      document.getElementById('form-status').textContent = message;
+      invalid.reportValidity();
+      invalid.focus();
       return;
     }
     const text = `Hola ASSA, me gustaría consultar un trabajo.\n${get('nombre') ? 'Nombre: ' + get('nombre') + '\n' : ''}Servicio: ${get('servicio')}\nLocalidad: ${get('localidad')}\n\n${get('mensaje')}`;
