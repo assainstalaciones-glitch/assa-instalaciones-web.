@@ -100,3 +100,11 @@
 #trabajo-documentado{scroll-margin-top:120px}
 @media(max-width:900px){.trust-facts .container,.case-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.review-cards{gap:14px}.review-cards blockquote{padding:20px}}
 @media(max-width:640px){.review-cards{grid-template-columns:1fr}.review-cards blockquote{gap:14px}.brand-band ul{gap:18px 25px}.brand-band li{font-size:18px}.trust-facts b{font-size:15px}.trust-facts .container{gap:20px}.service-cta-actions{width:100%}.case-facts{grid-template-columns:1fr;gap:20px}.case-study{padding-block:38px}}
+
+/* Align brand names and keep mobile navigation clear of the contact bar. */
+.brand-band li+li{margin-top:0}
+@media(max-width:640px){
+ .header-contact{min-height:44px!important}
+ .mobile-menu nav{max-height:calc(100dvh - 180px - env(safe-area-inset-bottom))}
+ .mobile-contact a{min-height:44px;display:flex;align-items:center;justify-content:center}
+}
