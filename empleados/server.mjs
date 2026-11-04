@@ -279,10 +279,10 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       F.job.paymentConfirmed,F.job.invoiceSentAt,F.job.paymentConfirmedAt,
       F.job.budget,F.job.date,F.job.completedOn];
     const orderFields=[F.order.job,F.order.state,F.order.pdf,F.order.number];
-    const [jobs,orders]=await Promise.all([
-      list('jobs',dashFields,3000),list('orders',orderFields,3000)
+    const [jobs,orders,clients]=await Promise.all([
+      list('jobs',dashFields,3000),list('orders',orderFields,3000),list('clients',[F.client.name,F.client.address],3000)
     ]);
-    return json(res,200,buildAdminDashboard(jobs,orders));
+    return json(res,200,buildAdminDashboard(jobs,orders,clients));
   }
   const adminConfirmMatch=p.match(/^\/api\/admin\/jobs\/(rec[A-Za-z0-9]{14})\/confirm$/);
   if(adminConfirmMatch&&method==='PATCH'){
