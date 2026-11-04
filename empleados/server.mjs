@@ -132,8 +132,17 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const allOrders=await list('orders',Object.values(F.order),1000);
     const related=allOrders.filter(r=>(r.fields[F.order.job]||[]).includes(job.id));
     const already=related.find(r=>r.fields[F.order.state]==='Firmado / archivado'&&(r.fields[F.order.pdf]||[]).length);
-    if(already)return json(res,200,{ok:true,alreadySigned:true,
-      part:{id:already.id,number:already.fields[F.order.number]||'',file:(already.fields[F.order.pdf]||[])[0]||null}});
+    if(already){
+      // Si falló un paso posterior a guardar el PDF, recuperar el cierre sin duplicar partes.
+      const current=candidates.find(r=>r.fields[F.report.user]===user.username)||
+        (admin?candidates.find(r=>!r.fields[F.report.done]):null);
+      if(current&&!current.fields[F.report.done]){
+        await patch('reports',current.id,{[F.report.done]:true,[F.report.closed]:new Date().toISOString()});
+      }
+      await patch('jobs',job.id,{[F.job.state]:'Terminado'});
+      return json(res,200,{ok:true,alreadySigned:true,
+        part:{id:already.id,number:already.fields[F.order.number]||'',file:(already.fields[F.order.pdf]||[])[0]||null}});
+    }
     const now=new Date(),signedAt=now.toISOString();
     const reference='PORTAL-FIRMA:'+job.id;
     const receiptHash=createHash('sha256').update(JSON.stringify({job:job.id,report:selected.id,signer,address,customerNotes,signedAt})).update(signature).digest('hex').slice(0,24);
