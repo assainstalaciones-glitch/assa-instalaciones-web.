@@ -44,9 +44,10 @@ function displayDate(date){
   return match?match[3]+'/'+match[2]+'/'+match[1]:raw;
 }
 function customerFacing(text){
-  return clean(text).split('\n').filter(row=>
-    !/(?:^|\b)(precio\s*(?:neto|coste)?|margen|beneficio|coste\s+interno|presupuesto\s+(?:assa-|n[ºo.]|de\s+\d)|importe\s+(?:total|presupuestado))/i.test(row)
-  ).join('\n').trim();
+  return clean(text).split('\n').map(row=>
+    row.replace(/\bPresupuesto\s+(?:ASSA[-\s]?\d+|n[ºo.]\s*\d+|de\s+\d+).*$/i,'').trim()
+  ).filter(row=>row&&!/^(?:precio|margen|beneficio|coste interno|importe total|importe presupuestado)\b/i.test(row))
+   .join('\n').trim();
 }
 export async function createSignedWorkPdf({number,job={},report={},signer='',address='',customerNotes='',signedAt,signature=null,receiptHash=''}) {
   const signed=!!signature;
@@ -167,6 +168,7 @@ export async function createSignedWorkPdf({number,job={},report={},signer='',add
   infoRow('Cliente',job.client||'-','Teléfono',job.phone||'-');
   infoRow('Dirección de la intervención',address||job.address||'-','Población / C.P.',[job.postal,job.city].filter(Boolean).join(' ')||'-');
   infoRow('Técnico / operario',report.user||'-','Presupuesto / referencia',job.budget||job.reference||'-');
+  if(job.service||job.time)infoRow('Servicio',job.service||'-','Hora prevista',job.time||'-');
   if(job.email||job.taxId)infoRow('Correo del cliente',job.email||'-','NIF / DNI',job.taxId||'-');
 
   y-=6;
