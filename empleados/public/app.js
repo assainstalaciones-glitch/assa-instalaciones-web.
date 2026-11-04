@@ -59,9 +59,9 @@ function renderDashboard(){
     if(r.closed)badges.push('<span class="dash-tag ok">Cerrado · cobrado</span>');
     if(r.signed)badges.push('<span class="dash-tag ok">OT firmada</span>');
     else if(r.needsSignature)badges.push('<span class="dash-tag warn">Firma pendiente en trabajo activo</span>');
-    else if(r.hasArchivedUnsignedOt)badges.push('<span class="dash-tag neutral">OT anterior sin PDF de firma vinculado</span>');
+    else if(r.hasArchivedUnsignedOt&&!r.closed)badges.push('<span class="dash-tag neutral">OT histórica sin firma digital vinculada</span>');
     if(r.invoiceSent)badges.push('<span class="dash-tag ok">Envío confirmado</span>');
-    else if(r.invoiceRef)badges.push('<span class="dash-tag neutral">Factura registrada · envío no verificado</span>');
+    else if(r.invoiceRef)badges.push(`<span class="dash-tag neutral">${r.closed?'Factura registrada':'Factura registrada · envío no verificado'}</span>`);
     else if(r.noInvoiceEvidence)badges.push('<span class="dash-tag warn">Factura sin vincular en Airtable</span>');
     else if(r.nonBillable)badges.push('<span class="dash-tag neutral">Intervención sin cargo</span>');
     if(r.paymentConfirmed)badges.push(`<span class="dash-tag ${r.paymentNeedsReconcile?'warn':'ok'}">Cobro verificado${r.paymentNeedsReconcile?' · conciliar':''}</span>`);
@@ -83,7 +83,7 @@ function renderDashboard(){
       <div class="dash-finance"><span>Factura: <strong>${h(r.invoiceRef||'Sin referencia')}</strong></span><span>Cobrado en CRM: <strong>${h(money(r.paid))}</strong></span>${r.paymentState?`<span>Estado CRM: <strong>${h(r.paymentState)}</strong></span>`:''}${r.otNumber?`<span>OT: <strong>${h(r.otNumber)}</strong></span>`:''}</div>
       ${r.anomalies?.length?`<div class="warning">${r.anomalies.map(a=>h(a)).join(' · ')}</div>`:''}
       ${r.dataIncomplete?`<p class="smalltext dash-incomplete"><strong>Datos por completar:</strong> ${h(r.missingData.join(' · '))}</p>`:''}
-      <div class="dash-controls"><label><input type="checkbox" data-dashboard-confirm="invoiceSent" data-id="${h(r.id)}" ${r.invoiceSent?'checked':''}> Envío de factura confirmado</label>${r.paidInCrm?'<span class="dash-payment-ok">✓ Cobro registrado en CRM; no hace falta marcarlo otra vez</span>':`<label><input type="checkbox" data-dashboard-confirm="paymentConfirmed" data-id="${h(r.id)}" ${r.paymentConfirmed?'checked':''}> Cobro confirmado</label>`}</div>
+      ${r.closed?'<div class="dash-controls"><span class="dash-payment-ok">✓ Expediente cerrado: factura vinculada y cobro conciliado en Airtable</span></div>':`<div class="dash-controls"><label><input type="checkbox" data-dashboard-confirm="invoiceSent" data-id="${h(r.id)}" ${r.invoiceSent?'checked':''}> Envío de factura confirmado</label>${r.paidInCrm?'<span class="dash-payment-ok">✓ Cobro registrado en CRM; no hace falta marcarlo otra vez</span>':`<label><input type="checkbox" data-dashboard-confirm="paymentConfirmed" data-id="${h(r.id)}" ${r.paymentConfirmed?'checked':''}> Cobro confirmado</label>`}</div>`}
       <div class="dash-card-actions"><button type="button" class="button small light" data-open-dashboard="${h(r.id)}">Ver trabajo</button>${r.signedPdf?`<a class="button small ghost" href="${h(r.signedPdf)}" target="_blank" rel="noopener noreferrer">📄 OT firmada</a>`:''}</div>
     </article>`).join(''):'<div class="empty"><div class="symbol">✓</div><h3>No hay trabajos en este filtro</h3><p>Prueba con otra categoría o modifica la búsqueda.</p></div>'}</div>
     <p class="smalltext dash-disclaimer-bottom">Las casillas son controles administrativos independientes. No crean ni editan facturas, importes cobrados o transferencias. Un cobro confirmado sin conciliación de importes queda señalado para revisar.</p>`);
