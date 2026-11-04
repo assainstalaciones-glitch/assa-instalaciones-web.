@@ -90,7 +90,7 @@ export async function createSignedWorkPdf({number,job,report,signer,address,cust
   paragraph('La persona firmante confirma que se le ha mostrado este parte y que reconoce la realización de la intervención descrita. Su firma no sustituye una factura ni limita las garantías o derechos que correspondan.',{size:9.4,leading:14});
   space(175);
   line('Nombre de quien firma',signer);
-  line('Fecha y hora de firma',signedAt);
+  line('Fecha y hora de firma',new Intl.DateTimeFormat('es-ES',{timeZone:'Europe/Madrid',dateStyle:'short',timeStyle:'short'}).format(new Date(signedAt)));
   page.drawRectangle({x:43,y:y-116,width:350,height:112,borderColor:rgb(.77,.84,.86),borderWidth:1,color:WHITE});
   page.drawImage(png,{x:51,y:y-108,width:333,height:94});
   y-=133;
