@@ -126,7 +126,11 @@ async function staticFile(req,res,p){if(req.method!=='GET')throw failure(405,'MÃ
 const server=http.createServer(async(req,res)=>{try{const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
-  if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({airtableTokenFormatOk:TOKEN.startsWith('pat'),sessionSecretOk:SECRET.length>=32,bootstrapUserOk:!!ROOTUSER,bootstrapHashOk:ROOTHASH.startsWith('scrypt
-export { passwordHash,comparePassword,sign,verify,server };)}));
+  if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({
+    airtableTokenFormatOk:TOKEN.startsWith('pat'),
+    sessionSecretOk:SECRET.length>=32,
+    bootstrapUserOk:!!ROOTUSER,
+    bootstrapHashOk:ROOTHASH.startsWith('scrypt$')
+  }));
 });
 export { passwordHash,comparePassword,sign,verify,server };
