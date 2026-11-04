@@ -1,12 +1,20 @@
-// Panel privado de dirección. Valores derivados, sin editar facturas ni importes financieros.
+// Panel privado de dirección. Resumen operativo; jamás escribir facturas o importes desde este módulo.
 export const ACTIVE_STATUSES=new Set(['Pendiente de visita','Aceptado / Programado','En progreso']);
 const WORK_STATUSES=new Set(['Aceptado / Programado','En progreso','Terminado','Facturado','Pendiente de cobro']);
 const FINAL_STATUSES=new Set(['Terminado','Facturado','Pendiente de cobro']);
+
 export function isTestRecord(fields){
   const title=String(fields['Trabajo / referencia']||'');
   const client=String(fields['Nombre del Cliente']||'');
   return /^\s*(?:PRUEBA\s+(?:\d+\b|PORTAL\b|INTERNA\b|OT\b|FIRMA\b)|TEST(?:\s|[-_])|SIMULACI[ÓO]N\b)/i.test(title)||
     /\b(?:CLIENTE FICTICIO|PRUEBA INTERNA ASSA)\b/i.test(title+' '+client);
+}
+export function workNotesEvidence(notes) {
+  const n=String(notes||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const free=/(?:no cobro nada|no cobrar|no facturar como ingreso|servicio gratuito|sin cargo para el cliente)/.test(n);
+  const explicitlyOpen=/(?:pendiente de cobro|pago pendiente|falta cobrar|resto pendiente|no dar (?:por )?cobrado)/.test(n);
+  const reportedPaid=!explicitlyOpen&&/(?:trabajo (?:terminado|realizado) y (?:pagado|cobrado)|revision terminada y pagada|revision (?:terminada|realizada) y cobrada|factura (?:emitida y )?cobrada integramente|trabajo (?:quedo|esta) (?:terminado y )?pagado|trabajo (?:quedo|esta) (?:terminado y )?cobrado|traslado.*trabajo terminado, cobrado|trabajo terminado, cobrado)/.test(n);
+  return {free,reportedPaid};
 }
 export function buildAdminDashboard(jobs,orders) {
   const ordersByJob=new Map();
@@ -28,6 +36,8 @@ export function buildAdminDashboard(jobs,orders) {
     const linked=ordersByJob.get(j.id)||[];
     const signedOrder=linked.find(o=>o.fields?.['Estado parte']==='Firmado / archivado'&&
       (o.fields?.['Parte firmado']||[]).length);
+    const clientName=String(f['Nombre del Cliente']||'').trim();
+    const linkedClient=Array.isArray(f['Cliente'])&&f['Cliente'].length>0;
     const invoiceRef=String(f['Ref. factura']||'').trim();
     const invoiceSent=!!f['Factura enviada (portal)'];
     const paymentConfirmed=!!f['Cobro confirmado (portal)'];
@@ -35,31 +45,44 @@ export function buildAdminDashboard(jobs,orders) {
     const paid=typeof f['Importe cobrado']==='number'&&f['Importe cobrado']>=0?f['Importe cobrado']:null;
     const paymentState=String(f['Estado cobro']||'');
     const paidInCrm=paymentState==='Cobrado'||(total!==null&&paid!==null&&paid>=total-.01);
+    const notes=workNotesEvidence(f['Descripción del trabajo']);
+    const paidReported=!paidInCrm&&!paymentConfirmed&&notes.reportedPaid;
+    const nonBillable=notes.free&&total===null&&!invoiceRef;
     const paymentNeedsReconcile=paymentConfirmed&&!paidInCrm;
     const hasInvoiceEvidence=invoiceSent||!!invoiceRef||['Facturado','Pendiente de cobro'].includes(status);
-    const needsInvoice=FINAL_STATUSES.has(status)&&!invoiceSent;
-    const noInvoiceEvidence=FINAL_STATUSES.has(status)&&!invoiceSent&&!invoiceRef&&status!=='Facturado';
-    const needsSignature=WORK_STATUSES.has(status)&&!signedOrder;
-    const needsPayment=hasInvoiceEvidence&&!paymentConfirmed&&!paidInCrm;
     const active=ACTIVE_STATUSES.has(status);
+    const final=FINAL_STATUSES.has(status);
+    // "Sin referencia" != "no existe factura"; "sin checkbox" != "no enviada".
+    const noInvoiceEvidence=final&&!invoiceRef&&!invoiceSent&&!nonBillable;
+    const needsInvoice=final&&!!invoiceRef&&!invoiceSent&&!paidInCrm&&!paymentConfirmed&&!paidReported;
+    const needsSignature=WORK_STATUSES.has(status)&&linked.length>0&&!signedOrder;
+    const needsPayment=hasInvoiceEvidence&&!paymentConfirmed&&!paidInCrm&&!paidReported&&!nonBillable;
+    const missingData=[
+      ...(!clientName?['Nombre del cliente']:[]),
+      ...(!linkedClient?['Ficha de cliente sin vincular']:[]),
+      ...(final&&!invoiceRef&&!nonBillable?['Referencia de factura sin vincular']:[])
+    ];
+    const dataIncomplete=missingData.length>0;
     const anomalies=[
-      ...(paymentNeedsReconcile?['Cobro confirmado, importes sin conciliar']:[]),
-      ...(invoiceSent&&!invoiceRef?['Envío confirmado sin referencia de factura en Airtable']:[]),
+      ...(paymentNeedsReconcile?['Cobro marcado manualmente, pero importes sin conciliar']:[]),
       ...((paymentState==='Cobrado'&&total!==null&&paid!==null&&paid+.01<total)?
         ['Estado cobrado, pero importe recibido inferior al total']:[])
     ];
     rows.push({
       id:j.id,reference:String(f['Trabajo / referencia']||'Trabajo sin referencia'),
-      client:String(f['Nombre del Cliente']||'Cliente por completar'),
-      address:String(f['Dirección']||''),date:f['Fecha previsto']||f['Fecha prevista']||f['Fecha realizado']||'',
+      client:clientName||'Cliente por completar',
+      address:String(f['Dirección']||''),date:f['Fecha prevista']||f['Fecha realizado']||'',
       status,invoiceRef,invoiceSent,paymentConfirmed,paymentState,total,paid,
       invoiceConfirmedAt:f['Fecha confirmación envío factura (portal)']||'',
       paymentConfirmedAt:f['Fecha confirmación cobro (portal)']||'',
       budget:String(f['Nº presupuesto']||''),
-      signed:!!signedOrder,otNumber:String(signedOrder?.fields?.['Número de orden']||linked[0]?.fields?.['Número de orden']||''),
+      signed:!!signedOrder,hasOt:linked.length>0,
+      otNumber:String(signedOrder?.fields?.['Número de orden']||linked[0]?.fields?.['Número de orden']||''),
       signedPdf:(signedOrder?.fields?.['Parte firmado']||[])[0]?.url||'',
-      active,needsSignature,needsInvoice,noInvoiceEvidence,needsPayment,paymentNeedsReconcile,paidInCrm,anomalies,
-      needsReview:anomalies.length>0||(FINAL_STATUSES.has(status)&&(needsSignature||needsInvoice||needsPayment))
+      active,needsSignature,needsInvoice,noInvoiceEvidence,needsPayment,
+      paymentNeedsReconcile,paidInCrm,paidReported,nonBillable,dataIncomplete,missingData,anomalies,
+      needsReview:anomalies.length>0||needsInvoice||needsPayment||(active&&needsSignature)||
+        (active&&!clientName)||(noInvoiceEvidence&&!paidInCrm&&!paidReported)
     });
   }
   const recent=(a,b)=>String(b.date||'').localeCompare(String(a.date||''))||a.reference.localeCompare(b.reference);
@@ -75,6 +98,8 @@ export function buildAdminDashboard(jobs,orders) {
       missingInvoice:count(r=>r.noInvoiceEvidence),
       paymentPending:count(r=>r.needsPayment),
       reconciliation:count(r=>r.paymentNeedsReconcile),
+      incomplete:count(r=>r.dataIncomplete),
+      notesPaid:count(r=>r.paidReported),
       needsReview:count(r=>r.needsReview)
     },
     rows
