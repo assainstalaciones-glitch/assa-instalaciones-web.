@@ -44,7 +44,7 @@ async function airtable(table, method='GET', path='', body=null, fields=null){
     return data;
   }finally{clearTimeout(timer);}
 }
-async function getOne(table,id,fields){if(!validId(id))throw failure(400,'Referencia inválida.');return airtable(table,'GET',`/${id}`,null,fields);}
+async function getOne(table,id){if(!validId(id))throw failure(400,'Referencia inválida.');return airtable(table,'GET',`/${id}`);}
 async function list(table,fields,cap=500){let records=[],offset='';do{const qs=new URLSearchParams({pageSize:'100'});if(offset)qs.set('offset',offset);const data=await airtable(table,'GET',`?${qs}`,null,fields);records.push(...(data.records||[]));offset=data.offset||'';}while(offset && records.length<cap);return records.slice(0,cap);}
 async function create(table,fields){return airtable(table,'POST','',{fields,typecast:false});}
 async function patch(table,id,fields){return airtable(table,'PATCH',`/${id}`,{fields,typecast:false});}
@@ -58,7 +58,7 @@ async function identify(req){const raw=(req.headers.cookie||'').split(';').map(s
 function reqAuth(user){if(!user)throw failure(401,'Accede con tu usuario y contraseña.');}
 function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failure(403,'Solo administración puede realizar esta acción.');}
 function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
-async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id,Object.values(F.job));if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');return job;}
+async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');return job;}
 function jobView(record,admin){const f=record.fields;const data={id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',status:f[F.job.state]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
 function reportView(r){const f=r.fields;return {id:r.id,user:f[F.report.user]||'',hours:f[F.report.hours]??'',material:f[F.report.material]||'',notes:f[F.report.notes]||'',date:f[F.report.date]||'',done:!!f[F.report.done],photos:(f[F.report.photos]||[]).map(x=>({id:x.id,filename:x.filename,url:x.thumbnails?.large?.url||x.url}))};}
 function dateMadrid(){const x=new Intl.DateTimeFormat('en-US',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(x.map(p=>[p.type,p.value]));return `${v.year}-${v.month}-${v.day}`;}
