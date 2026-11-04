@@ -33,3 +33,22 @@ test('La OT se puede mostrar al cliente sin firma antes de cerrar el trabajo',as
   assert.ok(pdf.getPageCount()>=1);
   assert.equal(buffer.subarray(0,4).toString(),'%PDF');
 });
+
+
+test('La OT corporativa admite datos completos de Airtable y muchas partidas sin cortar el documento',async()=>{
+  const materials=Array.from({length:35},(_,i)=>String(i+1)+' metros de tuberia y accesorios de instalacion para prueba de maquetacion').join('\n');
+  const buf=await createSignedWorkPdf({
+    number:'OT-2026-0999',job:{
+      id:'rec00000000000001',reference:'PRUEBA DE OT',client:'CLIENTE FICTICIO',
+      address:'Carrer de prova 120, local segundo, puerta izquierda, Cambrils',
+      city:'Cambrils',postal:'43850',phone:'600 000 000',email:'prueba@example.org',taxId:'00000000T',
+      budget:'PRES-2026-0022',date:'2026-11-04',
+      description:'Cambio de termo eléctrico de 50 litros con desmontaje del anterior y verificacion del funcionamiento.'
+    },
+    report:{user:'saul',date:'2026-11-04',hours:4,notes:'Instalación finalizada. Se realizan pruebas de estanqueidad y funcionamiento, con resultado satisfactorio.',material:materials},
+    signer:'',customerNotes:'',signedAt:'2026-11-04T20:00:00.000Z',signature:null,receiptHash:''
+  });
+  assert.equal(buf.subarray(0,4).toString(),'%PDF');
+  const doc=await PDFDocument.load(buf);
+  assert.ok(doc.getPageCount()>=2);
+});
