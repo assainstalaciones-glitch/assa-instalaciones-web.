@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createHmac, createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { createSignedWorkPdf } from './signed-pdf.mjs';
 import { buildCommercialOT } from './ot-commercial.mjs';
+import { confirmedBudget, prepareOtFields } from './ot-sync.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 10000);
@@ -137,6 +138,53 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   const assignMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/assign$/);
   if(assignMatch&&method==='PATCH'){reqAdmin(user);await getOne('jobs',assignMatch[1]);const b=await requestBody(req);const names=Array.isArray(b.users)?b.users.map(safeUsername):[];const employees=await list('users',Object.values(F.user));const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true).map(x=>x.fields[F.user.username]));if(names.some(x=>!allowed.has(x)))throw failure(400,'Algún usuario no está activo.');await patch('jobs',assignMatch[1],{[F.job.assigned]:[...new Set(names)].join(', ')});return json(res,200,{ok:true});}
 
+
+  const prepareMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/prepare-ot$/);
+  if(prepareMatch&&method==='POST'){
+    reqAdmin(user);
+    const job=await getOne('jobs',prepareMatch[1]);
+    const jf=job.fields;
+    if(!['Aceptado / Programado','En progreso'].includes(jf[F.job.state]))
+      throw failure(409,'Solo se puede preparar una OT desde un presupuesto aceptado.');
+    const all=await list('orders',Object.values(F.order),1000);
+    const related=all.filter(x=>(x.fields[F.order.job]||[]).includes(job.id));
+    if(related.length>1)throw failure(409,'Hay varias OT vinculadas. Revisarlas antes de crear o modificar.');
+    const existing=related[0]||null;
+    const st=existing?.fields[F.order.state]||'';
+    if(existing&&(st==='Firmado / archivado'||st==='Entregado al operario'||(existing.fields[F.order.pdf]||[]).length))
+      return json(res,200,{status:'archivada',message:'La OT ya está firmada o entregada. No se modifica.',number:existing.fields[F.order.number]});
+    const price=confirmedBudget({
+      budget:jf[F.job.budget],status:jf[F.job.state],total:jf[F.job.total],
+      net:jf['Venta neta sin IVA'],description:jf[F.job.desc]
+    });
+    const values={
+      id:job.id,client:jf[F.job.name],address:jf[F.job.address],
+      phone:jf[F.job.phone],email:jf[F.job.email],budget:jf[F.job.budget],
+      date:jf[F.job.date],description:jf[F.job.desc],
+      service:jf[F.job.service]
+    };
+    const {fields,conflict,reason}=prepareOtFields({
+      job:values,existing:existing?existing.fields:null,price
+    });
+    if(conflict)throw failure(409,'Precio de OT diferente al presupuesto. Revisar manualmente; no se ha modificado.');
+    const cleaned=Object.fromEntries(Object.entries(fields).filter(([k,v])=>
+      v!==null&&v!==undefined&&v!==''&&!(k==='Motivo del trabajo'&&!jf[F.job.service])
+    ));
+    let order=existing,updated=false;
+    if(existing){
+      if(Object.keys(cleaned).length){order=await patch('orders',existing.id,cleaned);updated=true;}
+    }else{
+      order=await create('orders',cleaned);updated=true;
+    }
+    const current=await getOne('orders',order.id);
+    return json(res,200,{
+      status:existing?(updated?'actualizada':'sin_cambios'):'creada',
+      orderId:order.id,number:current.fields[F.order.number]||'',
+      priceVerified:price.verified,priceReason:price.reason,
+      price:price.verified?{base:price.base,vatRate:price.vat,total:price.total}:null,
+      message:price.verified?'OT vinculada y precio validado.':'OT preparada sin precio: falta confirmar el importe del presupuesto.'
+    });
+  }
 
   const otDetailsMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/ot-details$/);
   if(otDetailsMatch&&(method==='GET'||method==='PATCH')){
