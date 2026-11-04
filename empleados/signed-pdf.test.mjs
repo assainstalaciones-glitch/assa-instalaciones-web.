@@ -50,5 +50,19 @@ test('La OT corporativa admite datos completos de Airtable y muchas partidas sin
   });
   assert.equal(buf.subarray(0,4).toString(),'%PDF');
   const doc=await PDFDocument.load(buf);
-  assert.ok(doc.getPageCount()>=2);
+  // El consumo interno no debe generar páginas adicionales en la OT comercial.
+  assert.equal(doc.getPageCount(),1);
+});
+
+
+test('Observaciones extensas se mantienen en un anexo sin truncar el espacio de firma',async()=>{
+  const buffer=await createSignedWorkPdf({
+    number:'OT-2026-0998',
+    job:{id:'rec00000000000001',client:'Cliente de prueba',address:'Cambrils',
+      commercial:{item:'Caldera Warmhaus Enerwa 24/31',base:1350,vatRate:.21,vatAmount:283.5,total:1633.5,priceVerified:true}},
+    report:{user:'saul',date:'2026-11-04',hours:3,notes:Array.from({length:25},(_,i)=>'Observación técnica '+i+' sin información confidencial').join('\n'),material:'Material interno no incluido en OT'},
+    signer:'',customerNotes:'',signedAt:'2026-11-04T20:00:00.000Z',signature:null,receiptHash:''
+  });
+  const pdf=await PDFDocument.load(buffer);
+  assert.ok(pdf.getPageCount()>=2);
 });
