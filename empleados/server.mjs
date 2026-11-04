@@ -102,6 +102,36 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   const assignMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/assign$/);
   if(assignMatch&&method==='PATCH'){reqAdmin(user);await getOne('jobs',assignMatch[1]);const b=await requestBody(req);const names=Array.isArray(b.users)?b.users.map(safeUsername):[];const employees=await list('users',Object.values(F.user));const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true).map(x=>x.fields[F.user.username]));if(names.some(x=>!allowed.has(x)))throw failure(400,'Algún usuario no está activo.');await patch('jobs',assignMatch[1],{[F.job.assigned]:[...new Set(names)].join(', ')});return json(res,200,{ok:true});}
 
+  const otPreviewMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/ot$/);
+  if(otPreviewMatch&&method==='GET'){
+    const job=await authorizedJob(otPreviewMatch[1],user);
+    const reports=await list('reports',Object.values(F.report),1000);
+    const related=reports.filter(x=>(x.fields[F.report.job]||[]).includes(job.id));
+    const own=related.find(x=>x.fields[F.report.user]===user.username);
+    const chosen=own||(admin?related[0]:null);
+    const details=chosen?.fields||{};
+    const report={
+      user:details[F.report.user]||user.username,
+      date:details[F.report.date]||dateMadrid(),
+      hours:details[F.report.hours]??'',
+      material:details[F.report.material]||'',
+      notes:details[F.report.notes]||''
+    };
+    const pdf=await createSignedWorkPdf({
+      number:'BORRADOR - SIN FIRMAR',
+      job:{id:job.id,reference:job.fields[F.job.ref],client:job.fields[F.job.name],
+        address:job.fields[F.job.address],description:job.fields[F.job.desc]},
+      report,signer:'',address:job.fields[F.job.address],customerNotes:'',
+      signedAt:new Date().toISOString(),signature:null,receiptHash:''
+    });
+    res.writeHead(200,{
+      'Content-Type':'application/pdf',
+      'Content-Disposition':'inline; filename="ASSA_OT_vista_previa.pdf"',
+      'Cache-Control':'private, no-store',
+      'X-Content-Type-Options':'nosniff'
+    });
+    return res.end(pdf);
+  }
   const signedMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/signed$/);
   if(signedMatch&&method==='GET'){
     await authorizedJob(signedMatch[1],user);
