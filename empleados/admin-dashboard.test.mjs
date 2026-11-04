@@ -91,7 +91,9 @@ test('OT anterior sin firma se identifica sin abrir un falso cobro pendiente',()
     'Ref. factura':'073-26','Importe total':871.2,'Importe cobrado':871.2})
  ],[order('rec00000000000009','rec00000000000008',
   {'Estado parte':'Pendiente de completar','Número de orden':'OT-2026-0009'})]).rows[0];
- assert.equal(r.needsSignature,true);
+ assert.equal(r.needsSignature,false); // OT antigua sin firma digital no es firma pendiente en trabajo activo.
+ assert.equal(r.hasArchivedUnsignedOt,true);
+ assert.equal(r.closed,true);
  assert.equal(r.needsPayment,false);
  assert.equal(r.needsReview,false);
 });
@@ -103,4 +105,21 @@ test('Una factura enviada con referencia no enlazada es documentación, no nuevo
  assert.equal(r.needsInvoice,false);
  assert.equal(r.dataIncomplete,true);
  assert.equal(r.noInvoiceEvidence,false);
+});
+
+
+test('Obras terminadas y con pago confirmado migran a Cerrados y cobrados',()=>{
+ const d=buildAdminDashboard([
+  job('rec00000000000011',{'Trabajo / referencia':'Aire acondicionado Mitsubishi',
+   'Nombre del Cliente':'María Dolores','Cliente':['rec00000000000017'],
+   'Estado':'Terminado','Ref. factura':'074-26','Factura enviada (portal)':true,
+   'Cobro confirmado (portal)':true,'Importe total':1399,'Importe cobrado':1399,
+   'Estado cobro':'Cobrado'})
+ ],[order('rec00000000000012','rec00000000000011',
+  {'Estado parte':'Pendiente de completar','Número de orden':'OT-2026-0001'})]);
+ assert.equal(d.counts.closed,1);
+ assert.equal(d.counts.reconciliation,0);
+ assert.equal(d.counts.unsigned,0);
+ assert.equal(d.counts.needsReview,0);
+ assert.equal(d.rows[0].hasArchivedUnsignedOt,true);
 });
