@@ -30,3 +30,13 @@ Sin AIRTABLE_TOKEN no está operativo el inicio de sesión: la API devuelve 503 
 - Si se marca cobro confirmado pero `Importe cobrado` o `Estado cobro` no concuerdan, se genera una alerta **por conciliar**, no una cifra financiera inventada.
 - Solo administración puede consultar `GET /api/admin/dashboard` o editar `PATCH /api/admin/jobs/:id/confirm`, donde `field` se limita a `invoiceSent` y `paymentConfirmed` y `checked` es booleano.
 - Las cifras son un resumen operativo del estado actual en Airtable, **no contabilidad certificada**. Los trabajos históricos anteriores al portal pueden no tener firma, factura o cobro documentados en estas tablas.
+
+
+### Conciliación de fichas y facturas (04/11/2026)
+- Verificar primero coincidencia real de cliente, dirección, concepto e importe con los originales de Drive, Gmail o evidencia de cobro; no mezclar personas con nombres parecidos ni documentos de otras instalaciones.
+- **Factura localizada** no significa **factura enviada**; solo se confirma envío ante correo, prueba documental o declaración expresa documentada del cliente/administración.
+- **Pagado según las notas** no significa **cobro conciliado**; el panel separa ambos conceptos y no rellena importes ni cambia el estado contable por la mera existencia de observaciones.
+- Los trabajos anteriores al uso de OT digitales pueden carecer de PDF firmado en Airtable sin que deba suponerse que falta una firma real. Solo se avisa de ausencia de firma cuando existe un registro de OT vinculado.
+- El panel incluye **Fichas por completar** para nombres de clientes, vínculo a CLIENTES y referencias fiscales ausentes. **Sin referencia en Airtable** no equivale a que no exista factura.
+- Trabajos no facturables expresamente confirmados no entran en avisos de facturación; registros de simulación y facturas históricas sin estado siguen excluidos del panel operativo.
+- Los PDFs de facturas, importes cobrados, costes y documentación firmada quedan fuera de cualquier escritura de la auditoría del portal.
