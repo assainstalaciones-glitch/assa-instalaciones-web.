@@ -5,7 +5,7 @@ const FINAL_STATUSES=new Set(['Terminado','Facturado','Pendiente de cobro']);
 export function isTestRecord(fields){
   const title=String(fields['Trabajo / referencia']||'');
   const client=String(fields['Nombre del Cliente']||'');
-  return /^\s*(?:PRUEBA\b|TEST(?:\s|[-_])|SIMULACI[ÓO]N\b)/i.test(title)||
+  return /^\s*(?:PRUEBA\s+(?:\d+\b|PORTAL\b|INTERNA\b|OT\b|FIRMA\b)|TEST(?:\s|[-_])|SIMULACI[ÓO]N\b)/i.test(title)||
     /\b(?:CLIENTE FICTICIO|PRUEBA INTERNA ASSA)\b/i.test(title+' '+client);
 }
 export function buildAdminDashboard(jobs,orders) {
