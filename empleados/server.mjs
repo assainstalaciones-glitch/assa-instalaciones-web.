@@ -137,6 +137,74 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   const assignMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/assign$/);
   if(assignMatch&&method==='PATCH'){reqAdmin(user);await getOne('jobs',assignMatch[1]);const b=await requestBody(req);const names=Array.isArray(b.users)?b.users.map(safeUsername):[];const employees=await list('users',Object.values(F.user));const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true).map(x=>x.fields[F.user.username]));if(names.some(x=>!allowed.has(x)))throw failure(400,'Algún usuario no está activo.');await patch('jobs',assignMatch[1],{[F.job.assigned]:[...new Set(names)].join(', ')});return json(res,200,{ok:true});}
 
+
+  const otDetailsMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/ot-details$/);
+  if(otDetailsMatch&&(method==='GET'||method==='PATCH')){
+    const job=await authorizedJob(otDetailsMatch[1],user);
+    const orders=await list('orders',Object.values(F.order),1000);
+    const related=orders.filter(x=>(x.fields[F.order.job]||[]).includes(job.id));
+    let order=related.find(x=>x.fields[F.order.state]==='Pendiente de completar')||
+      related.find(x=>x.fields[F.order.state]==='Firmado / archivado')||related[0];
+    const signed=related.some(x=>x.fields[F.order.state]==='Firmado / archivado'&&
+      (x.fields[F.order.pdf]||[]).length);
+    if(method==='PATCH'){
+      reqAdmin(user);
+      const b=await requestBody(req);
+      const allowed={client:200,address:220,phone:50,email:200,city:100,postal:14,taxId:32,budgetDate:10,time:40};
+      const fields={},jobChanges={};
+      for(const [key,max] of Object.entries(allowed)){
+        if(!Object.hasOwn(b,key))continue;
+        const value=limit(b[key],max);
+        if(key==='email'&&value&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+          throw failure(400,'El correo electrónico no tiene un formato válido.');
+        if(key==='budgetDate'&&value&&!/^\d{4}-\d{2}-\d{2}$/.test(value))
+          throw failure(400,'La fecha del presupuesto debe tener formato AAAA-MM-DD.');
+        if(key==='phone'&&value&&!/^[+()0-9 .-]{6,50}$/.test(value))
+          throw failure(400,'El teléfono debe contener un número válido.');
+        fields[F.order[key]]=value||null;
+        if(['client','address','phone','email'].includes(key))jobChanges[F.job[key==='client'?'name':key]]=value||null;
+      }
+      if(!Object.keys(fields).length)throw failure(400,'No hay datos para guardar.');
+      // La ficha administrativa se puede completar después, sin sustituir el PDF original firmado.
+      if(order){
+        if(signed){
+          const prior=order.fields[F.order.internal]||'';
+          const audit='DATOS ADMINISTRATIVOS ACTUALIZADOS '+new Date().toISOString()+' por '+user.username+
+            ' (OT firmada conservada; campos: '+Object.keys(b).filter(x=>allowed[x]).join(', ')+')';
+          fields[F.order.internal]=(prior+'\n'+audit).trim().slice(-8500);
+        }
+        await patch('orders',order.id,fields);
+      }else{
+        const newFields={
+          ...fields,[F.order.job]:[job.id],
+          [F.order.client]:fields[F.order.client]||job.fields[F.job.name]||'Cliente pendiente',
+          [F.order.date]:job.fields[F.job.date]||dateMadrid(),
+          [F.order.budget]:job.fields[F.job.budget]||undefined,
+          [F.order.state]:'Pendiente de completar',
+          [F.order.internal]:'OT preliminar creada desde el portal por '+user.username+
+            ' el '+new Date().toISOString()+'. Sin factura emitida.'
+        };
+        for(const key of Object.keys(newFields))if(newFields[key]===undefined)delete newFields[key];
+        order=await create('orders',newFields);
+      }
+      if(Object.keys(jobChanges).length)await patch('jobs',job.id,jobChanges);
+      const changedJob=await getOne('jobs',job.id);
+      const changedOrder=await getOne('orders',order.id);
+      const info=await otJobData(changedJob,changedOrder);
+      return json(res,200,{ok:true,info,number:changedOrder.fields[F.order.number]||'',
+        signed,documentNotice:signed?'Se han completado datos administrativos; el PDF firmado no ha sido alterado.':'OT preliminar actualizada en Airtable.'});
+    }
+    const info=await otJobData(job,order);
+    const missing=[];
+    for(const [k,label] of Object.entries({
+      client:'Nombre del cliente',address:'Dirección de la intervención',phone:'Teléfono',
+      email:'Correo electrónico',city:'Población',postal:'Código postal',taxId:'NIF / DNI'
+    }))if(!info[k])missing.push(label);
+    if(!info.commercial.priceVerified)missing.push('Importe del presupuesto aceptado y su IVA');
+    return json(res,200,{info,number:order?.fields[F.order.number]||'Sin OT numerada',
+      missing,signed,editable:admin});
+  }
+
   const otPreviewMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/ot$/);
   if(otPreviewMatch&&method==='GET'){
     const job=await authorizedJob(otPreviewMatch[1],user);
