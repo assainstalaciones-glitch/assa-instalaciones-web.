@@ -31,14 +31,15 @@ function renderDashboard(){
     {key:'review',label:'Necesitan revisión'},
     {key:'active',label:'Activos'},
     {key:'unsigned',label:'Sin OT firmada'},
-    {key:'noInvoice',label:'Sin factura registrada'},
+    {key:'noInvoice',label:'Sin referencia de factura'},
+    {key:'incomplete',label:'Fichas por completar'},
     {key:'invoice',label:'Envío por confirmar'},
     {key:'payment',label:'Por cobrar'},
     {key:'all',label:'Todos'}
   ];
   const predicate={
     review:r=>r.needsReview,active:r=>r.active,unsigned:r=>r.needsSignature,
-    noInvoice:r=>r.noInvoiceEvidence,invoice:r=>r.needsInvoice,
+    noInvoice:r=>r.noInvoiceEvidence,incomplete:r=>r.dataIncomplete,invoice:r=>r.needsInvoice,
     payment:r=>r.needsPayment,all:r=>true
   }[state.dashboardFilter]||(()=>true);
   const search=(state.dashboardSearch||'').toLocaleLowerCase('es');
@@ -46,7 +47,8 @@ function renderDashboard(){
   const stats=[
     {label:'Trabajos activos',value:counts.active||0,kind:'active'},
     {label:'Sin firma registrada',value:counts.unsigned||0,kind:'unsigned'},
-    {label:'Sin factura registrada',value:counts.missingInvoice||0,kind:'noInvoice'},
+    {label:'Facturas sin referencia',value:counts.missingInvoice||0,kind:'noInvoice'},
+    {label:'Fichas incompletas',value:counts.incomplete||0,kind:'incomplete'},
     {label:'Por cobrar',value:counts.paymentPending||0,kind:'payment'},
     {label:'Revisión pendiente',value:counts.needsReview||0,kind:'review'}
   ];
@@ -55,16 +57,19 @@ function renderDashboard(){
     if(r.signed)badges.push('<span class="dash-tag ok">OT firmada</span>');
     else if(r.needsSignature)badges.push('<span class="dash-tag warn">Firma no registrada</span>');
     if(r.invoiceSent)badges.push('<span class="dash-tag ok">Envío confirmado</span>');
-    else if(r.invoiceRef)badges.push('<span class="dash-tag neutral">Ref. factura · envío por confirmar</span>');
-    else if(r.noInvoiceEvidence)badges.push('<span class="dash-tag warn">Sin factura registrada</span>');
+    else if(r.invoiceRef)badges.push('<span class="dash-tag neutral">Factura registrada · envío no verificado</span>');
+    else if(r.noInvoiceEvidence)badges.push('<span class="dash-tag warn">Factura sin vincular en Airtable</span>');
+    else if(r.nonBillable)badges.push('<span class="dash-tag neutral">Intervención sin cargo</span>');
     if(r.paymentConfirmed)badges.push(`<span class="dash-tag ${r.paymentNeedsReconcile?'warn':'ok'}">Cobro verificado${r.paymentNeedsReconcile?' · conciliar':''}</span>`);
     else if(r.paidInCrm)badges.push('<span class="dash-tag ok">Cobrado según CRM</span>');
-    else if(r.needsPayment)badges.push('<span class="dash-tag warn">Cobro por confirmar</span>');
+    else if(r.paidReported)badges.push('<span class="dash-tag neutral">Pagado según seguimiento · sin conciliar</span>');
+    else if(r.needsPayment)badges.push('<span class="dash-tag warn">Cobro pendiente en CRM</span>');
+    if(r.dataIncomplete)badges.push('<span class="dash-tag neutral">Datos por completar</span>');
     return badges.join('');
   };
   layout(`<div class="topbar"><div class="titleblock"><span class="eyebrow">Solo administración ASSA</span><h1>Panel de dirección</h1><p>Seguimiento de trabajos, órdenes firmadas, facturas y cobros registrados en Airtable.</p></div><span class="chip">● Datos de Airtable</span></div>
     <section class="dash-kpis">${stats.map(x=>`<button type="button" class="dash-kpi ${state.dashboardFilter===x.kind?'selected':''}" data-dash-filter="${x.kind}"><span>${h(x.label)}</span><strong>${Number(x.value)}</strong></button>`).join('')}</section>
-    <div class="pale dash-disclaimer">Se han revisado <strong>${Number(scope.operational||0)} trabajos operativos</strong>. Se excluyen ${Number(scope.unclassified||0)} registros históricos sin estado y ${Number(scope.excludedTests||0)} pruebas. «Sin firma» o «sin factura» significa <strong>que no consta en Airtable</strong>, no que el cliente no la haya recibido.</div>
+    <div class="pale dash-disclaimer">Se han revisado <strong>${Number(scope.operational||0)} trabajos operativos</strong>. Se excluyen ${Number(scope.unclassified||0)} registros históricos sin estado y ${Number(scope.excludedTests||0)} pruebas. «Sin referencia de factura» o «sin OT firmada» significa <strong>que el documento no está vinculado en estas tablas</strong>, no que no exista o no haya sido enviado. Un cobro anotado en observaciones no es conciliación bancaria.</div>
     <div class="section-head"><h2>Trabajos para revisar</h2><button class="button small light" id="dashRefresh">↻ Actualizar</button></div>
     <div class="tabs dash-tabs">${filters.map(x=>`<button type="button" class="tab ${state.dashboardFilter===x.key?'active':''}" data-dash-filter="${x.key}">${h(x.label)}</button>`).join('')}</div>
     <div class="toolbar"><input id="dashSearch" aria-label="Buscar en el panel" placeholder="Buscar cliente, trabajo o factura" value="${h(state.dashboardSearch)}"></div>
@@ -73,7 +78,8 @@ function renderDashboard(){
       <div class="dash-tags">${kindState(r)}</div>
       <div class="dash-finance"><span>Factura: <strong>${h(r.invoiceRef||'Sin referencia')}</strong></span><span>Cobrado en CRM: <strong>${h(money(r.paid))}</strong></span>${r.paymentState?`<span>Estado CRM: <strong>${h(r.paymentState)}</strong></span>`:''}${r.otNumber?`<span>OT: <strong>${h(r.otNumber)}</strong></span>`:''}</div>
       ${r.anomalies?.length?`<div class="warning">${r.anomalies.map(a=>h(a)).join(' · ')}</div>`:''}
-      <div class="dash-controls"><label><input type="checkbox" data-dashboard-confirm="invoiceSent" data-id="${h(r.id)}" ${r.invoiceSent?'checked':''}> Factura enviada</label><label><input type="checkbox" data-dashboard-confirm="paymentConfirmed" data-id="${h(r.id)}" ${r.paymentConfirmed?'checked':''}> Cobro confirmado</label></div>
+      ${r.dataIncomplete?`<p class="smalltext dash-incomplete"><strong>Datos por completar:</strong> ${h(r.missingData.join(' · '))}</p>`:''}
+      <div class="dash-controls"><label><input type="checkbox" data-dashboard-confirm="invoiceSent" data-id="${h(r.id)}" ${r.invoiceSent?'checked':''}> Envío de factura confirmado</label>${r.paidInCrm?'<span class="dash-payment-ok">✓ Cobro registrado en CRM; no hace falta marcarlo otra vez</span>':`<label><input type="checkbox" data-dashboard-confirm="paymentConfirmed" data-id="${h(r.id)}" ${r.paymentConfirmed?'checked':''}> Cobro confirmado</label>`}</div>
       <div class="dash-card-actions"><button type="button" class="button small light" data-open-dashboard="${h(r.id)}">Ver trabajo</button>${r.signedPdf?`<a class="button small ghost" href="${h(r.signedPdf)}" target="_blank" rel="noopener noreferrer">📄 OT firmada</a>`:''}</div>
     </article>`).join(''):'<div class="empty"><div class="symbol">✓</div><h3>No hay trabajos en este filtro</h3><p>Prueba con otra categoría o modifica la búsqueda.</p></div>'}</div>
     <p class="smalltext dash-disclaimer-bottom">Las casillas son controles administrativos independientes. No crean ni editan facturas, importes cobrados o transferencias. Un cobro confirmado sin conciliación de importes queda señalado para revisar.</p>`);
