@@ -6,7 +6,7 @@ export function isTestRecord(fields){
   const title=String(fields['Trabajo / referencia']||'');
   const client=String(fields['Nombre del Cliente']||'');
   return /^\s*(?:PRUEBA\b|TEST(?:\s|[-_])|SIMULACI[ÓO]N\b)/i.test(title)||
-    /\b(?:CLIENTE FICTICIO|NO FACTURAR|PRUEBA INTERNA ASSA)\b/i.test(title+' '+client);
+    /\b(?:CLIENTE FICTICIO|PRUEBA INTERNA ASSA)\b/i.test(title+' '+client);
 }
 export function buildAdminDashboard(jobs,orders) {
   const ordersByJob=new Map();
