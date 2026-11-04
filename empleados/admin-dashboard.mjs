@@ -55,7 +55,10 @@ export function buildAdminDashboard(jobs,orders) {
     // "Sin referencia" != "no existe factura"; "sin checkbox" != "no enviada".
     const noInvoiceEvidence=final&&!invoiceRef&&!invoiceSent&&!nonBillable;
     const needsInvoice=final&&!!invoiceRef&&!invoiceSent&&!paidInCrm&&!paymentConfirmed&&!paidReported;
-    const needsSignature=WORK_STATUSES.has(status)&&linked.length>0&&!signedOrder;
+    // Una OT anterior al portal puede carecer de firma digital sin convertir un
+    // trabajo cobrado en una incidencia administrativa nueva.
+    const hasArchivedUnsignedOt=FINAL_STATUSES.has(status)&&linked.length>0&&!signedOrder;
+    const needsSignature=ACTIVE_STATUSES.has(status)&&linked.length>0&&!signedOrder;
     const needsPayment=hasInvoiceEvidence&&!paymentConfirmed&&!paidInCrm&&!paidReported&&!nonBillable;
     const missingData=[
       ...(!clientName?['Nombre del cliente']:[]),
@@ -63,6 +66,7 @@ export function buildAdminDashboard(jobs,orders) {
       ...(final&&!invoiceRef&&!nonBillable?['Referencia de factura sin vincular']:[])
     ];
     const dataIncomplete=missingData.length>0;
+    const closed=final&&paidInCrm&&!!invoiceRef&&!dataIncomplete;
     const anomalies=[
       ...(paymentNeedsReconcile?['Cobro marcado manualmente, pero importes sin conciliar']:[]),
       ...((paymentState==='Cobrado'&&total!==null&&paid!==null&&paid+.01<total)?
@@ -76,7 +80,7 @@ export function buildAdminDashboard(jobs,orders) {
       invoiceConfirmedAt:f['Fecha confirmación envío factura (portal)']||'',
       paymentConfirmedAt:f['Fecha confirmación cobro (portal)']||'',
       budget:String(f['Nº presupuesto']||''),
-      signed:!!signedOrder,hasOt:linked.length>0,
+      signed:!!signedOrder,hasOt:linked.length>0,hasArchivedUnsignedOt,closed,
       otNumber:String(signedOrder?.fields?.['Número de orden']||linked[0]?.fields?.['Número de orden']||''),
       signedPdf:(signedOrder?.fields?.['Parte firmado']||[])[0]?.url||'',
       active,needsSignature,needsInvoice,noInvoiceEvidence,needsPayment,
@@ -99,6 +103,7 @@ export function buildAdminDashboard(jobs,orders) {
       paymentPending:count(r=>r.needsPayment),
       reconciliation:count(r=>r.paymentNeedsReconcile),
       incomplete:count(r=>r.dataIncomplete),
+      closed:count(r=>r.closed),
       notesPaid:count(r=>r.paidReported),
       needsReview:count(r=>r.needsReview)
     },
