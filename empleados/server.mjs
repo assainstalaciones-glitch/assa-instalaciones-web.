@@ -2,12 +2,13 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHmac, createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createSignedWorkPdf } from './signed-pdf.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 10000);
 const BASE = process.env.AIRTABLE_BASE_ID || 'appdHOIMfkGPduA83';
-const T = { jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0' };
+const T = { jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx' };
 const TOKEN = (process.env.AIRTABLE_TOKEN || '').trim();
 const SECRET = process.env.SESSION_SECRET || '';
 const ROOTUSER = (process.env.BOOTSTRAP_USER || '').trim().toLowerCase();
@@ -18,6 +19,7 @@ const F = {
   job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', phone:'Número de teléfono', desc:'Descripción del trabajo', date:'Fecha prevista', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente' },
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
+  order:{job:'Trabajo origen',operator:'Operario',date:'Fecha instalación',client:'Cliente',address:'Dirección',phone:'Teléfono',title:'Motivo del trabajo',detail:'Trabajos a realizar / partidas',state:'Estado parte',pdf:'Parte firmado',number:'Número de orden',internal:'Notas internas'},
   visit:{title:'Visita / servicio solicitado',job:'Trabajo existente',client:'Cliente existente',contact:'Contacto por identificar',service:'Servicio',address:'Dirección de la visita',measures:'Mediciones',material:'Materiales y equipos',workers:'Operarios estimados',hours:'Horas estimadas por operario',access:'Incidencias y acceso',photos:'Fotos',notes:'Notas',next:'Siguiente paso',date:'Fecha visita',tech:'Técnico de la visita'}
 };
 const FIELD_PHOTOS = { reports:'fldi3uQwhsfp7anwe', visits:'fldp141UFEZVquqTN' };
@@ -99,6 +101,85 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   if(jobMatch&&method==='GET'){const j=await authorizedJob(jobMatch[1],user);return json(res,200,{job:jobView(j,admin)});}
   const assignMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/assign$/);
   if(assignMatch&&method==='PATCH'){reqAdmin(user);await getOne('jobs',assignMatch[1]);const b=await requestBody(req);const names=Array.isArray(b.users)?b.users.map(safeUsername):[];const employees=await list('users',Object.values(F.user));const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true).map(x=>x.fields[F.user.username]));if(names.some(x=>!allowed.has(x)))throw failure(400,'Algún usuario no está activo.');await patch('jobs',assignMatch[1],{[F.job.assigned]:[...new Set(names)].join(', ')});return json(res,200,{ok:true});}
+
+  const signedMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/signed$/);
+  if(signedMatch&&method==='GET'){
+    await authorizedJob(signedMatch[1],user);
+    const records=await list('orders',Object.values(F.order),1000);
+    const parts=records.filter(x=>(x.fields[F.order.job]||[]).includes(signedMatch[1])&&
+      x.fields[F.order.state]==='Firmado / archivado').map(x=>({
+        id:x.id,number:x.fields[F.order.number]||'Parte firmado',
+        file:(x.fields[F.order.pdf]||[])[0]||null
+      }));
+    return json(res,200,{parts});
+  }
+  const signMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/sign$/);
+  if(signMatch&&method==='POST'){
+    const job=await authorizedJob(signMatch[1],user);
+    if(!ACTIVE.has(job.fields[F.job.state]))throw failure(409,'Este trabajo ya no está abierto.');
+    const b=await requestBody(req);
+    const signer=limit(b.signer,120),address=limit(b.address,220),customerNotes=limit(b.customerNotes,1900);
+    if(signer.length<3||b.accepted!==true)throw failure(400,'Indica el nombre de quien firma y su conformidad con la recepción.');
+    const imageMatch=/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(b.signature||''));
+    if(!imageMatch||imageMatch[1].length>2800000)throw failure(400,'Falta una firma manuscrita válida.');
+    const signature=Buffer.from(imageMatch[1],'base64');
+    if(signature.length<150||signature.length>2000000||signature.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw failure(400,'No se ha podido leer la firma.');
+    const allReports=await list('reports',Object.values(F.report),1000);
+    const candidates=allReports.filter(r=>(r.fields[F.report.job]||[]).includes(job.id));
+    const selected=candidates.find(r=>r.fields[F.report.user]===user.username)||
+      (admin?candidates.find(r=>!r.fields[F.report.done]):null);
+    if(!selected||(!selected.fields[F.report.material]&&!selected.fields[F.report.notes]))throw failure(400,'Guarda antes el parte con materiales u observaciones.');
+    const allOrders=await list('orders',Object.values(F.order),1000);
+    const related=allOrders.filter(r=>(r.fields[F.order.job]||[]).includes(job.id));
+    const already=related.find(r=>r.fields[F.order.state]==='Firmado / archivado'&&(r.fields[F.order.pdf]||[]).length);
+    if(already)return json(res,200,{ok:true,alreadySigned:true,
+      part:{id:already.id,number:already.fields[F.order.number]||'',file:(already.fields[F.order.pdf]||[])[0]||null}});
+    const now=new Date(),signedAt=now.toISOString();
+    const reference='PORTAL-FIRMA:'+job.id;
+    const receiptHash=createHash('sha256').update(JSON.stringify({job:job.id,report:selected.id,signer,address,customerNotes,signedAt})).update(signature).digest('hex').slice(0,24);
+    const report={user:selected.fields[F.report.user],date:selected.fields[F.report.date],
+      hours:selected.fields[F.report.hours],material:selected.fields[F.report.material],notes:selected.fields[F.report.notes]};
+    let order=related.find(r=>r.fields[F.order.state]==='Pendiente de completar'&&String(r.fields[F.order.internal]||'').includes(reference));
+    if(!order){
+      const fields={
+        [F.order.job]:[job.id],[F.order.operator]:report.user||user.username,
+        [F.order.date]:/^\d{4}-\d{2}-\d{2}$/.test(report.date||'')?report.date:dateMadrid(),
+        [F.order.client]:limit(job.fields[F.job.name],250)||'Cliente',
+        [F.order.address]:address||limit(job.fields[F.job.address],220),
+        [F.order.title]:limit(job.fields[F.job.desc],220)||'Intervención técnica',
+        [F.order.detail]:limit('Descripción del encargo:\n'+(job.fields[F.job.desc]||'')+'\n\nTrabajo realizado:\n'+(report.notes||'')+
+          '\n\nMateriales:\n'+(report.material||'')+'\n\nObservaciones cliente:\n'+customerNotes,20000),
+        [F.order.state]:'Pendiente de completar',
+        [F.order.internal]:reference+' | Creado desde el portal de empleados. Fecha firma: '+signedAt+
+          ' | Firmante: '+signer+' | Operario: '+user.username+' | Verificación: '+receiptHash
+      };
+      if(job.fields[F.job.phone])fields[F.order.phone]=limit(job.fields[F.job.phone],50);
+      order=await create('orders',fields);
+    }
+    const current=await getOne('orders',order.id);
+    if(!(current.fields[F.order.pdf]||[]).length){
+      const pdf=await createSignedWorkPdf({
+        number:current.fields[F.order.number]||order.id,
+        job:{id:job.id,reference:job.fields[F.job.ref],client:job.fields[F.job.name],
+          address:job.fields[F.job.address],description:job.fields[F.job.desc]},
+        report,signer,address,customerNotes,signedAt,signature,receiptHash
+      });
+      if(pdf.length>4.8*1024*1024)throw failure(413,'El parte firmado es demasiado grande.');
+      const filename='ASSA_PARTE_FIRMADO_'+(current.fields[F.order.number]||order.id).replace(/[^-\w]/g,'_')+'.pdf';
+      const upload=await fetch('https://content.airtable.com/v0/'+BASE+'/'+order.id+'/fldKN4rSAmjwUqyNK/uploadAttachment',{
+        method:'POST',headers:{Authorization:'Bearer '+TOKEN,'Content-Type':'application/json'},
+        body:JSON.stringify({file:pdf.toString('base64'),filename,contentType:'application/pdf'})
+      });
+      if(!upload.ok){console.error('Airtable signed PDF upload',upload.status);throw failure(502,'El PDF no se pudo guardar en Airtable. Prueba de nuevo.');}
+    }
+    await patch('orders',order.id,{[F.order.state]:'Firmado / archivado'});
+    await patch('reports',selected.id,{[F.report.done]:true,[F.report.closed]:signedAt});
+    await patch('jobs',job.id,{[F.job.state]:'Terminado'});
+    const archived=await getOne('orders',order.id);
+    return json(res,200,{ok:true,part:{id:order.id,number:archived.fields[F.order.number]||'',
+      file:(archived.fields[F.order.pdf]||[])[0]||null}});
+  }
+
   const reportsMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/reports$/);
   if(reportsMatch){await authorizedJob(reportsMatch[1],user);const all=await list('reports',Object.values(F.report),1000);const related=all.filter(r=>(r.fields[F.report.job]||[]).includes(reportsMatch[1])&&(admin||r.fields[F.report.user]===user.username));
     if(method==='GET')return json(res,200,{reports:related.map(reportView)});
