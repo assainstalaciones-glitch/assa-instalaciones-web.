@@ -46,3 +46,7 @@
 .dash-disclaimer-bottom{margin-top:17px}
 @media(max-width:1050px){.dash-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:840px){.dash-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.dash-kpi{min-height:93px;padding:13px}.dash-kpi strong{font-size:28px}.dash-kpi span{font-size:11px}.dash-job{padding:15px}.dash-job-top{display:block}.dash-amount{display:inline-block;text-align:left;margin:8px 0;font-size:14px}.dash-amount small{display:inline;margin-left:6px}.dash-controls{display:grid;gap:10px}.dash-card-actions .button{flex:1}.bottom-nav button{padding:3px 7px;font-size:10px}}
+
+/* Separar comprobaciones reales de la documentación pendiente en fichas históricas. */
+.dash-incomplete{background:#f0f4f7;border-radius:10px;padding:10px 12px;margin:11px 0;color:#476075}
+.dash-payment-ok{font-weight:750;color:#13634e;font-size:13px;padding:3px 0}
