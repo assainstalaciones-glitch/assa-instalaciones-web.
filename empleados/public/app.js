@@ -24,7 +24,7 @@ function render(){if(state.page==='dashboard')renderDashboard();else if(state.pa
 
 function renderDashboard(){
   if(state.me?.role!=='administrador')return navigate('jobs');
-  const data=state.dashboard;if(!data)return layout('<section class="panel"><h2>Sin datos cargados</h2><button class="button primary" id="dashReload">Volver a consultar</button></section>');
+  const data=state.dashboard;if(!data)return layout('<section class="panel"><h2>No hay datos cargados</h2><p>Vuelve a entrar en Dirección para consultar Airtable.</p></section>');
   const counts=data.counts||{},rows=data.rows||[],scope=data.scope||{};
   const money=n=>typeof n==='number'&&Number.isFinite(n)?n.toLocaleString('es-ES',{style:'currency',currency:'EUR'}):'No confirmado';
   const filters=[
