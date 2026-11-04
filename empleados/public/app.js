@@ -78,7 +78,7 @@ function renderDashboard(){
     <div class="tabs dash-tabs">${filters.map(x=>`<button type="button" class="tab ${state.dashboardFilter===x.key?'active':''}" data-dash-filter="${x.key}">${h(x.label)}</button>`).join('')}</div>
     <div class="toolbar"><input id="dashSearch" aria-label="Buscar en el panel" placeholder="Buscar cliente, trabajo o factura" value="${h(state.dashboardSearch)}"></div>
     <div class="dash-list">${shown.length?shown.map(r=>`<article class="dash-job">
-      <div class="dash-job-top"><div><div class="ref">${h(r.reference||'Trabajo ASSA')}</div><h3>${h(r.client||'Cliente no indicado')}</h3><p class="smalltext">📍 ${h(r.address||'Dirección pendiente')} · ${h(r.status)}${r.date?' · 📅 '+h(r.date):''}</p></div><span class="dash-amount">${h(money(r.total))}<small>Importe registrado</small></span></div>
+      <div class="dash-job-top"><div><div class="ref">${h(r.reference||'Trabajo ASSA')}</div><h3>${h(r.client||'Cliente no indicado')}</h3><p class="smalltext">📍 ${h(r.address||'Dirección no registrada')}${r.addressFromClient?' (domicilio del cliente, no ubicación verificada de intervención)':''} · ${h(r.status)}${r.date?' · 📅 '+h(r.date):''}</p></div><span class="dash-amount">${h(money(r.total))}<small>Importe registrado</small></span></div>
       <div class="dash-tags">${kindState(r)}</div>
       <div class="dash-finance"><span>Factura: <strong>${h(r.invoiceRef||'Sin referencia')}</strong></span><span>Cobrado en CRM: <strong>${h(money(r.paid))}</strong></span>${r.paymentState?`<span>Estado CRM: <strong>${h(r.paymentState)}</strong></span>`:''}${r.otNumber?`<span>OT: <strong>${h(r.otNumber)}</strong></span>`:''}</div>
       ${r.anomalies?.length?`<div class="warning">${r.anomalies.map(a=>h(a)).join(' · ')}</div>`:''}
