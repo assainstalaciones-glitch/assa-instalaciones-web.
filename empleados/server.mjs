@@ -274,7 +274,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
 
   if(p==='/api/admin/dashboard'&&method==='GET'){
     reqAdmin(user);
-    const dashFields=[F.job.ref,F.job.name,F.job.address,F.job.state,F.job.total,
+    const dashFields=[F.job.ref,F.job.name,F.job.address,F.job.state,F.job.total,F.job.client,F.job.desc,
       F.job.collected,F.job.paymentState,F.job.invoiceRef,F.job.invoiceSent,
       F.job.paymentConfirmed,F.job.invoiceSentAt,F.job.paymentConfirmedAt,
       F.job.budget,F.job.date,F.job.completedOn];
