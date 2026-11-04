@@ -161,8 +161,9 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
           throw failure(400,'La fecha del presupuesto debe tener formato AAAA-MM-DD.');
         if(key==='phone'&&value&&!/^[+()0-9 .-]{6,50}$/.test(value))
           throw failure(400,'El teléfono debe contener un número válido.');
-        fields[F.order[key]]=value||null;
-        if(['client','address','phone','email'].includes(key))jobChanges[F.job[key==='client'?'name':key]]=value||null;
+        if(!value)continue; // Los campos vacíos no deben borrar datos ya confirmados en el CRM.
+        fields[F.order[key]]=value;
+        if(['client','address','phone','email'].includes(key))jobChanges[F.job[key==='client'?'name':key]]=value;
       }
       if(!Object.keys(fields).length)throw failure(400,'No hay datos para guardar.');
       // La ficha administrativa se puede completar después, sin sustituir el PDF original firmado.
