@@ -40,3 +40,10 @@ Sin AIRTABLE_TOKEN no está operativo el inicio de sesión: la API devuelve 503 
 - El panel incluye **Fichas por completar** para nombres de clientes, vínculo a CLIENTES y referencias fiscales ausentes. **Sin referencia en Airtable** no equivale a que no exista factura.
 - Trabajos no facturables expresamente confirmados no entran en avisos de facturación; registros de simulación y facturas históricas sin estado siguen excluidos del panel operativo.
 - Los PDFs de facturas, importes cobrados, costes y documentación firmada quedan fuera de cualquier escritura de la auditoría del portal.
+
+
+### Barrido de cierres, facturas y fichas 05/11/2026
+- Cuando Dirección confirme cobro manual en Airtable, cotejar importe con factura real y registrar `Importe cobrado` en la ficha del trabajo, sin alterar facturas originales. No confundir un check de la interfaz con un importe conciliado.
+- Los trabajos previos a la firma digital del Portal ASSA que estén terminados, con referencia de factura y cobro completo se mostrarán en **Cerrados y cobrados**. Una antigua OT sin PDF de firma sigue documentándose como **firma no digitalizada**, pero no se trata como una firma nueva pendiente.
+- Las fichas de CLIENTES sirven para completar nombres y domicilios visibles que falten en TRABAJOS. Si se toma una dirección del cliente, debe identificarse como domicilio de la ficha y no presumirse que es el lugar de la intervención.
+- Conservar pendientes genuinos: pagos parciales, cobros no demostrados y trabajos sin precio o referencia documental. No crear documentos fiscales ni fabricar firmas para cerrar alertas.
