@@ -10,5 +10,8 @@
     "start": "node server.mjs",
     "test": "node --test",
     "hash": "node scripts/hash-password.mjs"
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1"
   }
 }
