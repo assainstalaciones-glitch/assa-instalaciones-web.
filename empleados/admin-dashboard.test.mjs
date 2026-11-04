@@ -123,3 +123,18 @@ test('Obras terminadas y con pago confirmado migran a Cerrados y cobrados',()=>{
  assert.equal(d.counts.needsReview,0);
  assert.equal(d.rows[0].hasArchivedUnsignedOt,true);
 });
+
+
+test('Aprovecha el nombre y domicilio existentes en CLIENTES sin inventar la dirección de la intervención',()=>{
+ const r=buildAdminDashboard([
+  job('rec00000000000013',{'Trabajo / referencia':'Cliente sin repetir',
+    'Nombre del Cliente':'','Cliente':['rec00000000000017'],
+    'Estado':'Terminado','Ref. factura':'056-26',
+    'Importe total':145.2,'Importe cobrado':145.2})
+ ],[],[{id:'rec00000000000017',fields:{'Nombre':'Nombre confirmado en CRM','Dirección':'Domicilio del cliente'}}]).rows[0];
+ assert.equal(r.client,'Nombre confirmado en CRM');
+ assert.equal(r.address,'Domicilio del cliente');
+ assert.equal(r.addressFromClient,true);
+ assert.equal(r.dataIncomplete,false);
+ assert.equal(r.closed,true);
+});
