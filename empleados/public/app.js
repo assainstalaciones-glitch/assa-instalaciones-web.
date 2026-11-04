@@ -1,5 +1,5 @@
 const el=document.querySelector('#app');
-const state={me:null,jobs:[],employees:[],page:'jobs',job:null,reports:[],search:'',status:'active',savedVisit:null};
+const state={me:null,jobs:[],employees:[],page:'jobs',job:null,reports:[],signedParts:[],signedResult:null,search:'',status:'active',savedVisit:null};
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api=async(path,method='GET',data)=>{const resp=await fetch(`/api${path}`,{method,headers:{'Content-Type':'application/json'},credentials:'same-origin',body:data===undefined?undefined:JSON.stringify(data)});const json=await resp.json().catch(()=>({}));if(!resp.ok)throw new Error(json.error||`Error ${resp.status}`);return json;};
 let toastTimer;function toast(message,error=false){const box=document.querySelector('#toast');box.textContent=message;box.className=error?'visible error':'visible';clearTimeout(toastTimer);toastTimer=setTimeout(()=>box.className='',4600);}
@@ -19,21 +19,22 @@ function showLogin(){el.innerHTML=`<div class="login-scene"><div class="login-ar
 async function logout(){await api('/logout','POST').catch(()=>{});state.me=null;showLogin();}
 async function loadJobs(){state.jobs=(await api('/jobs')).jobs;}
 async function navigate(page){state.page=page;state.job=null;state.savedVisit=null;if(page==='jobs')await loadJobs();if(page==='users'){try{state.employees=(await api('/employees')).employees;}catch(e){toast(e.message,true);}}render();}
-function render(){if(state.page==='jobs')renderJobs();else if(state.page==='work')renderWork();else if(state.page==='visits')renderVisits();else if(state.page==='users')renderUsers();}
+function render(){if(state.page==='jobs')renderJobs();else if(state.page==='work')renderWork();else if(state.page==='visits')renderVisits();else if(state.page==='users')renderUsers();else if(state.page==='sign')renderSign();else if(state.page==='signedDone')renderSignedDone();}
 function renderJobs(){const isAdmin=state.me.role==='administrador';let jobs=state.jobs.filter(x=>`${x.reference} ${x.client} ${x.address} ${x.description}`.toLowerCase().includes(state.search.toLowerCase()));if(state.status==='active')jobs=jobs.filter(x=>['Aceptado / Programado','En progreso','Pendiente de visita'].includes(x.status));else jobs=jobs.filter(x=>!['Aceptado / Programado','En progreso','Pendiente de visita'].includes(x.status));
  const active=state.jobs.filter(x=>['Aceptado / Programado','En progreso','Pendiente de visita'].includes(x.status)).length;const completed=state.jobs.length-active;
  layout(`<div class="topbar"><div class="titleblock"><span class="eyebrow">Área de ${isAdmin?'administración':'operarios'}</span><h1>Mis trabajos</h1><p>${isAdmin?'Control de los trabajos de ASSA':'Consulta tus trabajos asignados y registra lo realizado'}</p></div><span class="chip">● Conectado</span></div><section class="kpis"><div class="kpi"><span>Activos</span><strong>${active}</strong></div><div class="kpi"><span>${isAdmin?'Cerrados / otros':'Mis trabajos'}</span><strong>${isAdmin?completed:active}</strong></div><div class="kpi"><span>Visitas</span><strong>↗</strong></div></section><div class="section-head"><h2>Listado de trabajos</h2><button class="button small primary" id="newVisit">+ Visita técnica</button></div>${isAdmin?`<div class="tabs"><button class="tab ${state.status==='active'?'active':''}" data-tab="active">Activos</button><button class="tab ${state.status==='closed'?'active':''}" data-tab="closed">Cerrados / otros</button></div>`:''}<div class="toolbar"><input id="search" placeholder="Buscar cliente, dirección o referencia" value="${h(state.search)}"/></div><div class="list">${jobs.length?jobs.map(job=>`<article class="job-card"><div><div class="ref">${h(job.reference||'Trabajo ASSA')}</div><h3>${h(job.client||'Cliente sin nombre')}</h3><p>📍 ${h(job.address||'Dirección pendiente')}</p><p>🔧 ${h(job.description||'Sin descripción')}</p><div class="foot"><span class="status ${['Aceptado / Programado','En progreso'].includes(job.status)?'on':'off'}">${h(job.status)}</span>${job.date?`<span class="smalltext">📅 ${h(job.date)}</span>`:''}${isAdmin&&job.assigned?`<span class="smalltext">👷 ${h(job.assigned)}</span>`:''}</div></div><button class="button small ${['Terminado','Facturado'].includes(job.status)?'light':'primary'}" data-open="${job.id}">Ver trabajo</button></article>`).join(''):`<div class="empty"><div class="symbol">✓</div><h3>No hay trabajos en este listado</h3><p>${isAdmin?'Cambia el filtro o asigna trabajos a los operarios.':'Cuando te asignen un trabajo, aparecerá aquí.'}</p></div>`}</div>`);
  el.querySelector('#newVisit').addEventListener('click',()=>navigate('visits'));el.querySelector('#search').addEventListener('input',e=>{state.search=e.target.value;const cursor=e.target.selectionStart;renderJobs();const input=el.querySelector('#search');input.focus();input.setSelectionRange(cursor,cursor);});el.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{state.status=b.dataset.tab;renderJobs();}));el.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>openJob(b.dataset.open)));}
-async function openJob(id){try{state.job=(await api(`/jobs/${id}`)).job;state.reports=(await api(`/jobs/${id}/reports`)).reports;state.page='work';if(state.me.role==='administrador'){state.employees=(await api('/employees')).employees;}render();}catch(e){toast(e.message,true);}}
-function renderWork(){const job=state.job;if(!job)return navigate('jobs');const admin=state.me.role==='administrador';const report=state.reports.find(r=>r.user===state.me.username);const locked=!admin&&!['Aceptado / Programado','En progreso','Pendiente de visita'].includes(job.status);const done=report?.done||locked;
+async function openJob(id){try{state.job=(await api(`/jobs/${id}`)).job;state.reports=(await api(`/jobs/${id}/reports`)).reports;state.signedParts=(await api(`/jobs/${id}/signed`)).parts;state.page='work';if(state.me.role==='administrador'){state.employees=(await api('/employees')).employees;}render();}catch(e){toast(e.message,true);}}
+function renderWork(){const job=state.job;if(!job)return navigate('jobs');const admin=state.me.role==='administrador';const report=state.reports.find(r=>r.user===state.me.username);const locked=!admin&&!['Aceptado / Programado','En progreso','Pendiente de visita'].includes(job.status);const signed=state.signedParts[0];const done=!!signed||report?.done||locked;
  const employees=state.employees.filter(x=>x.active&&x.role==='tecnico');const assigned=job.assigned.toLowerCase().split(/[,;\n]/).map(x=>x.trim());
  layout(`<button class="button ghost small" id="back">← Volver</button><div class="detail-head"><span class="eyebrow">${h(job.reference||'Trabajo de ASSA')}</span><h1>${h(job.client||'Cliente pendiente')}</h1><span class="status ${['Terminado','Facturado'].includes(job.status)?'off':'on'}">${h(job.status)}</span><div class="details-strip"><span>📍 ${h(job.address)}</span><span>📅 ${h(job.date||'Sin fecha')}</span>${job.phone?`<span>📞 ${h(job.phone)}</span>`:''}</div></div><section class="panel"><h2>Descripción del trabajo</h2><p>${h(job.description||'No se ha añadido descripción.')}</p></section>
  ${admin?`<section class="panel"><h2><span class="section-num">👷</span>Asignar instaladores</h2><p class="muted">Solo verán los trabajos que les asignes y estén abiertos.</p><div class="switches">${employees.map(u=>`<label class="check-pill"><input type="checkbox" value="${h(u.username)}" class="assign" ${assigned.includes(u.username)?'checked':''}>${h(u.name||u.username)}</label>`).join('')||'No hay operarios. Crea sus cuentas en Empleados.'}</div><div class="actions"><button class="button small primary" id="saveAssign">Guardar asignación</button></div></section>`:''}
- <section class="panel"><h2><span class="section-num">01</span>Parte de ejecución</h2><p class="muted">Anota el trabajo real. Los costes y precios se calculan por separado en Airtable.</p>${done?`<div class="notice">✓ Este parte está cerrado. Solo administración conserva el historial.</div>`:''}<form id="reportForm"> <div class="grid2">${field('hours','Horas reales trabajadas',report?.hours??'','number','step="0.25" min="0" max="24" ' +(done?'disabled':''))}${field('date','Fecha del trabajo',report?.date||new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),'date',done?'disabled':'')}</div>${area('material','Material utilizado',report?.material||'','Ejemplo: 2 metros de canaleta\n2 metros de cable\n8 codos de 18\nMedio tubo de 18')}${area('notes','Observaciones del instalador',report?.notes||'','Trabajo realizado, incidencias, pruebas, recomendaciones…')}<div class="form-field"><label for="photos">Fotografías del trabajo</label><input id="photos" type="file" accept="image/*" multiple ${done?'disabled':''}><small>Se comprimirán antes de subirlas a Airtable. No incluyas documentos sensibles.</small></div>${report?.photos?.length?`<div class="gallery">${report.photos.map((p,i)=>`<a href="${h(p.url)}" target="_blank" rel="noopener noreferrer">📷 Foto ${i+1}</a>`).join('')}</div>`:''}<div class="actions"><button type="submit" class="button primary" ${done?'disabled':''}>Guardar parte</button><button type="button" class="button danger" id="finish" ${done?'disabled':''}>✓ Cerrar trabajo</button></div></form></section>
+ <section class="panel"><h2><span class="section-num">01</span>Parte de ejecución</h2><p class="muted">Anota el trabajo real. Los costes y precios se calculan por separado en Airtable.</p>${done?`<div class="notice">✓ Este parte está cerrado. Solo administración conserva el historial.</div>`:''}<form id="reportForm"> <div class="grid2">${field('hours','Horas reales trabajadas',report?.hours??'','number','step="0.25" min="0" max="24" ' +(done?'disabled':''))}${field('date','Fecha del trabajo',report?.date||new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),'date',done?'disabled':'')}</div>${area('material','Material utilizado',report?.material||'','Ejemplo: 2 metros de canaleta\n2 metros de cable\n8 codos de 18\nMedio tubo de 18')}${area('notes','Observaciones del instalador',report?.notes||'','Trabajo realizado, incidencias, pruebas, recomendaciones…')}<div class="form-field"><label for="photos">Fotografías del trabajo</label><input id="photos" type="file" accept="image/*" multiple ${done?'disabled':''}><small>Se comprimirán antes de subirlas a Airtable. No incluyas documentos sensibles.</small></div>${report?.photos?.length?`<div class="gallery">${report.photos.map((p,i)=>`<a href="${h(p.url)}" target="_blank" rel="noopener noreferrer">📷 Foto ${i+1}</a>`).join('')}</div>`:''}<div class="actions"><button type="submit" class="button primary" ${done?'disabled':''}>Guardar parte</button><button type="button" class="button danger" id="finish" ${done?'disabled':''}>✍️ Firmar y finalizar trabajo</button></div></form></section>
+ ${renderWorkSigned(signed)}
  ${admin&&state.reports.length?`<section class="panel"><h2>Registro del equipo</h2>${state.reports.map(r=>`<div class="report"><strong>👷 ${h(r.user)}</strong> · ${h(r.hours)} h · ${r.done?'Cerrado':'En curso'}<div class="smalltext">${h(r.material||'Sin materiales')}</div><div class="smalltext">${h(r.notes||'Sin observaciones')}</div></div>`).join('')}</section>`:''}`);
  el.querySelector('#back').addEventListener('click',()=>navigate('jobs'));
  if(done){el.querySelectorAll('#reportForm input,#reportForm textarea').forEach(x=>x.disabled=true);}el.querySelector('#reportForm').addEventListener('submit',saveReport);
- el.querySelector('#finish').addEventListener('click',async()=>{if(!confirm('¿Cerrar este trabajo? Desaparecerá del listado de operarios, pero quedará archivado para administración.'))return;try{await saveReport(null,true);await api(`/jobs/${job.id}/finish`,'POST',{});toast('Trabajo cerrado y archivado.');await navigate('jobs');}catch(e){toast(e.message,true);}});
+ el.querySelector('#finish').addEventListener('click',async()=>{try{await saveReport(null,true);state.page='sign';render();}catch(e){/* El guardado muestra el error. */}});
  if(admin)el.querySelector('#saveAssign').addEventListener('click',async e=>{const users=[...el.querySelectorAll('.assign:checked')].map(x=>x.value);busy(e.target,true);try{await api(`/jobs/${job.id}/assign`,'PATCH',{users});toast('Instaladores asignados.');await openJob(job.id);}catch(err){toast(err.message,true);}finally{busy(e.target,false);}});
 }
 async function saveReport(event,forClose=false){event?.preventDefault();const form=el.querySelector('#reportForm');const btn=form.querySelector('[type=submit]');busy(btn,true);try{const data=formData(form);const files=[...form.querySelector('#photos').files];const res=await api(`/jobs/${state.job.id}/reports`,'POST',{hours:data.hours,date:data.date,material:data.material,notes:data.notes});for(let i=0;i<files.length;i++){toast(`Subiendo fotografía ${i+1} de ${files.length}…`);const photo=await compressImage(files[i]);await api(`/reports/${res.report.id}/photo`,'POST',photo);}state.reports=(await api(`/jobs/${state.job.id}/reports`)).reports;toast('Parte de trabajo guardado en Airtable.');if(!forClose)renderWork();return true;}catch(err){toast(err.message,true);throw err;}finally{busy(btn,false);}}
@@ -46,4 +47,69 @@ function renderUsers(){if(state.me.role!=='administrador')return navigate('jobs'
  el.querySelector('#userForm').addEventListener('submit',async ev=>{ev.preventDefault();const btn=ev.target.querySelector('button');busy(btn,true);try{await api('/employees','POST',formData(ev.target));toast('Empleado creado. Ya puedes facilitarle su usuario y contraseña.');await navigate('users');}catch(e){toast(e.message,true);}finally{busy(btn,false);}});
  el.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',async()=>{try{await api(`/employees/${b.dataset.toggle}/active`,'PATCH',{active:b.dataset.active!=='true'});await navigate('users');toast('Acceso actualizado.');}catch(e){toast(e.message,true);}}));
 }
+function renderWorkSigned(part){
+ if(!part)return '';
+ return `<section class="panel"><h2><span class="section-num">✍️</span>Parte firmado por el cliente</h2><div class="notice">✓ Documento firmado y archivado en Airtable · ${h(part.number)}</div>${part.file?.url?`<a class="button primary" target="_blank" rel="noopener noreferrer" href="${h(part.file.url)}">📄 Ver PDF firmado</a>`:'<p class="muted">El PDF está archivado en Airtable.</p>'}</section>`;
+}
+function renderSign(){
+ const job=state.job;
+ if(!job)return navigate('jobs');
+ const report=state.reports.find(r=>r.user===state.me.username)||state.reports.find(r=>!r.done)||state.reports[0];
+ if(!report){state.page='work';render();return toast('Guarda el parte antes de firmarlo.',true);}
+ layout(`<button class="button ghost small" id="backSign">← Volver al trabajo</button>
+ <div class="titleblock"><span class="eyebrow">Parte de trabajo ASSA</span><h1>Firma del cliente</h1><p>Muestra al cliente el trabajo realizado y pídele que firme en la pantalla.</p></div>
+ <section class="panel"><h2>Resumen de la intervención</h2>
+ <p><strong>Cliente:</strong> ${h(job.client||'Cliente')}<br><strong>Trabajo:</strong> ${h(job.reference||'Trabajo ASSA')}<br><strong>Dirección:</strong> ${h(job.address||'A confirmar')}<br><strong>Horas:</strong> ${h(report.hours??'Sin indicar')}</p>
+ <div class="pale"><strong>Trabajo solicitado</strong><p>${h(job.description||'Sin descripción')}</p></div>
+ <h3>Trabajo realizado y observaciones</h3><p class="signature-summary">${h(report.notes||'Sin observaciones adicionales')}</p>
+ <h3>Material empleado</h3><p class="signature-summary">${h(report.material||'Sin material detallado')}</p></section>
+ <form id="signatureForm"><section class="panel"><h2><span class="section-num">✍️</span>Recepción y firma</h2>
+ ${field('signer','Nombre y apellidos de quien firma','','text','required minlength="3" maxlength="120" autocomplete="name"')}
+ ${field('signAddress','Dirección del trabajo',job.address||'','text','maxlength="220"')}
+ ${area('customerNotes','Observaciones del cliente (si las hay)','','Incidencias pendientes, reservas o comentarios…')}
+ <p class="muted">Firmando confirmo que se me ha mostrado este parte y que reconozco la realización de la intervención descrita. La firma no sustituye una factura ni limita garantías o derechos.</p>
+ <div class="form-field"><label>Firma en la pantalla</label><canvas id="signatureCanvas" class="signature-canvas" width="960" height="280" aria-label="Zona para firmar con el dedo"></canvas><small>Firma con el dedo. Puedes borrar y repetir.</small></div>
+ <button type="button" class="button light small" id="clearSignature">Borrar firma</button>
+ <label class="signature-check"><input type="checkbox" id="signatureConsent" required> He revisado el parte y confirmo su recepción.</label>
+ <div class="warning">Al confirmar, se generará el PDF firmado en Airtable y el trabajo pasará a «Terminado». Para los operarios desaparecerá de trabajos activos.</div>
+ <div class="actions"><button class="button primary" type="submit">✓ Guardar firma y terminar trabajo</button></div></section></form>`);
+ el.querySelector('#backSign').addEventListener('click',()=>{state.page='work';render();});
+ const canvas=el.querySelector('#signatureCanvas'),ctx=canvas.getContext('2d');
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+ ctx.strokeStyle='#1d3046';ctx.lineWidth=5;ctx.lineCap='round';ctx.lineJoin='round';
+ let active=false,hasSignature=false,last=null;
+ const pos=e=>{const r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height};};
+ canvas.addEventListener('pointerdown',e=>{e.preventDefault();active=true;last=pos(e);canvas.setPointerCapture(e.pointerId);});
+ canvas.addEventListener('pointermove',e=>{if(!active)return;e.preventDefault();const p=pos(e);if(Math.hypot(p.x-last.x,p.y-last.y)>2){ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.stroke();hasSignature=true;last=p;}});
+ const end=()=>{active=false;last=null;};canvas.addEventListener('pointerup',end);canvas.addEventListener('pointercancel',end);
+ el.querySelector('#clearSignature').addEventListener('click',()=>{ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);hasSignature=false;});
+ el.querySelector('#signatureForm').addEventListener('submit',async ev=>{
+   ev.preventDefault();
+   if(!hasSignature)return toast('El cliente debe dibujar su firma.',true);
+   const button=ev.target.querySelector('button[type=submit]');busy(button,true);
+   try{
+     const result=await api(`/jobs/${job.id}/sign`,'POST',{
+       signer:el.querySelector('#signer').value,
+       address:el.querySelector('#signAddress').value,
+       customerNotes:el.querySelector('#customerNotes').value,
+       accepted:el.querySelector('#signatureConsent').checked,
+       signature:canvas.toDataURL('image/png')
+     });
+     state.signedResult=result.part;
+     state.page='signedDone';state.job=null;
+     await loadJobs();render();
+   }catch(error){toast(error.message,true);}
+   finally{busy(button,false);}
+ });
+}
+function renderSignedDone(){
+ const part=state.signedResult||{};
+ layout(`<div class="titleblock"><span class="eyebrow">ASSA Instalaciones</span><h1>Trabajo terminado y firmado</h1></div>
+ <section class="panel signed-success"><div class="signed-check">✓</div><h2>Parte firmado y archivado</h2>
+ <p>El documento ${h(part.number||'')} está registrado en Airtable. Administración conserva una copia, y el trabajo ya no aparecerá entre los activos del instalador.</p>
+ ${part.file?.url?`<a class="button primary" href="${h(part.file.url)}" target="_blank" rel="noopener noreferrer">📄 Abrir PDF firmado</a>`:''}
+ <button type="button" class="button ghost" id="returnJobs">Volver a mis trabajos</button></section>`);
+ el.querySelector('#returnJobs').addEventListener('click',()=>navigate('jobs'));
+}
+
 init();
