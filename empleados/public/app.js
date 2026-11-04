@@ -1,5 +1,5 @@
 const el=document.querySelector('#app');
-const state={me:null,jobs:[],employees:[],page:'jobs',job:null,reports:[],signedParts:[],signedResult:null,otData:null,search:'',status:'active',savedVisit:null};
+const state={me:null,jobs:[],employees:[],dashboard:null,dashboardFilter:'review',dashboardSearch:'',page:'jobs',job:null,reports:[],signedParts:[],signedResult:null,otData:null,search:'',status:'active',savedVisit:null};
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api=async(path,method='GET',data)=>{const resp=await fetch(`/api${path}`,{method,headers:{'Content-Type':'application/json'},credentials:'same-origin',body:data===undefined?undefined:JSON.stringify(data)});const json=await resp.json().catch(()=>({}));if(!resp.ok)throw new Error(json.error||`Error ${resp.status}`);return json;};
 let toastTimer;function toast(message,error=false){const box=document.querySelector('#toast');box.textContent=message;box.className=error?'visible error':'visible';clearTimeout(toastTimer);toastTimer=setTimeout(()=>box.className='',4600);}
@@ -8,18 +8,94 @@ function field(name,label,value='',type='text',attrs=''){return `<div class="for
 function area(name,label,value='',placeholder=''){return `<div class="form-field"><label for="${name}">${label}</label><textarea id="${name}" name="${name}" placeholder="${h(placeholder)}">${h(value)}</textarea></div>`;}
 function select(name,label,choices,value='',empty='Seleccionar…'){return `<div class="form-field"><label for="${name}">${label}</label><select id="${name}" name="${name}"><option value="">${empty}</option>${choices.map(x=>{const v=typeof x==='string'?x:x.value;const label=typeof x==='string'?x:x.label;return `<option value="${h(v)}" ${v===value?'selected':''}>${h(label)}</option>`;}).join('')}</select></div>`;}
 function formData(form){return Object.fromEntries(new FormData(form).entries());}
-function layout(content){const admin=state.me?.role==='administrador';const nav=[['jobs','📋','Trabajos'],['visits','📍','Visitas'],...(admin?[['users','👷','Empleados']]:[])];const navButtons=nav.map(([page,ico,label])=>`<button class="navbtn ${state.page===page?'active':''}" data-nav="${page}"><span class="navicon">${ico}</span>${label}</button>`).join('');const bottom=nav.map(([page,ico,label])=>`<button class="${state.page===page?'active':''}" data-nav="${page}"><span>${ico}</span>${label}</button>`).join('');
+function layout(content){const admin=state.me?.role==='administrador';const nav=[...(admin?[['dashboard','📊','Dirección']]:[]),['jobs','📋','Trabajos'],['visits','📍','Visitas'],...(admin?[['users','👷','Empleados']]:[])];const navButtons=nav.map(([page,ico,label])=>`<button class="navbtn ${state.page===page?'active':''}" data-nav="${page}"><span class="navicon">${ico}</span>${label}</button>`).join('');const bottom=nav.map(([page,ico,label])=>`<button class="${state.page===page?'active':''}" data-nav="${page}"><span>${ico}</span>${label}</button>`).join('');
  el.innerHTML=`<div class="layout"><aside class="sidebar"><div class="brand"><span class="brand-logo">A</span><span>ASSA <small style="display:block;font-size:10px;letter-spacing:1px;font-weight:600;color:#9cb9c8">INSTALACIONES</small></span></div>${navButtons}<div class="side-bottom"><strong>${h(state.me?.name||'')}</strong>${admin?'Administración':'Técnico instalador'}<button class="button small" id="logout">Cerrar sesión</button></div></aside><header class="header-mobile"><div class="brand"><span class="brand-logo">A</span> ASSA Instalaciones</div><button id="logoutMobile">Salir</button></header><main class="main">${content}</main><nav class="bottom-nav">${bottom}</nav></div>`;
  el.querySelectorAll('[data-nav]').forEach(btn=>btn.addEventListener('click',()=>navigate(btn.dataset.nav)));el.querySelectorAll('#logout,#logoutMobile').forEach(btn=>btn.addEventListener('click',logout));
 }
-async function init(){try{const result=await api('/me');state.me=result.user;await loadJobs();render();}catch{showLogin();}}
+async function init(){try{const result=await api('/me');state.me=result.user;if(state.me.role==='administrador'){state.page='dashboard';await loadDashboard();}else{state.page='jobs';await loadJobs();}render();}catch{showLogin();}}
 function showLogin(){el.innerHTML=`<div class="login-scene"><div class="login-art"><div class="brand"><span class="brand-logo">A</span> ASSA Instalaciones</div><div><h1>Todo el trabajo.<br>En un solo lugar.</h1><p>Visitas, partes de trabajo y seguimiento del equipo, organizados y conectados con ASSA.</p></div><div class="art-foot">Portal privado de empleados · Cambrils</div></div><div class="login-panel"><div class="login-card"><span class="eyebrow">Acceso exclusivo</span><h2>Bienvenido al equipo</h2><p class="muted">Accede con las credenciales facilitadas por ASSA.</p><form id="loginForm">${field('username','Usuario','','text','autocomplete="username" required autofocus')}${field('password','Contraseña','','password','autocomplete="current-password" required')}<button class="button primary full" type="submit">Entrar al portal</button></form><div class="hint">¿No tienes acceso? Pide tu usuario a administración.</div></div></div></div>`;
- document.querySelector('#loginForm').addEventListener('submit',async e=>{e.preventDefault();const btn=e.target.querySelector('button');busy(btn,true);try{const result=await api('/login','POST',formData(e.target));state.me=result.user;await loadJobs();render();}catch(err){toast(err.message,true);}finally{busy(btn,false);}});
+ document.querySelector('#loginForm').addEventListener('submit',async e=>{e.preventDefault();const btn=e.target.querySelector('button');busy(btn,true);try{const result=await api('/login','POST',formData(e.target));state.me=result.user;if(state.me.role==='administrador'){state.page='dashboard';await loadDashboard();}else{state.page='jobs';await loadJobs();}render();}catch(err){toast(err.message,true);}finally{busy(btn,false);}});
 }
 async function logout(){await api('/logout','POST').catch(()=>{});state.me=null;showLogin();}
+async function loadDashboard(){state.dashboard=await api('/admin/dashboard');}
 async function loadJobs(){state.jobs=(await api('/jobs')).jobs;}
-async function navigate(page){state.page=page;state.job=null;state.savedVisit=null;if(page==='jobs')await loadJobs();if(page==='users'){try{state.employees=(await api('/employees')).employees;}catch(e){toast(e.message,true);}}render();}
-function render(){if(state.page==='jobs')renderJobs();else if(state.page==='work')renderWork();else if(state.page==='visits')renderVisits();else if(state.page==='users')renderUsers();else if(state.page==='sign')renderSign();else if(state.page==='signedDone')renderSignedDone();else if(state.page==='otDetails')renderOTDetails();}
+async function navigate(page){state.page=page;state.job=null;state.savedVisit=null;if(page==='jobs')await loadJobs();if(page==='dashboard')await loadDashboard();if(page==='users'){try{state.employees=(await api('/employees')).employees;}catch(e){toast(e.message,true);}}render();}
+function render(){if(state.page==='dashboard')renderDashboard();else if(state.page==='jobs')renderJobs();else if(state.page==='work')renderWork();else if(state.page==='visits')renderVisits();else if(state.page==='users')renderUsers();else if(state.page==='sign')renderSign();else if(state.page==='signedDone')renderSignedDone();else if(state.page==='otDetails')renderOTDetails();}
+
+function renderDashboard(){
+  if(state.me?.role!=='administrador')return navigate('jobs');
+  const data=state.dashboard;if(!data)return layout('<section class="panel"><h2>Sin datos cargados</h2><button class="button primary" id="dashReload">Volver a consultar</button></section>');
+  const counts=data.counts||{},rows=data.rows||[],scope=data.scope||{};
+  const money=n=>typeof n==='number'&&Number.isFinite(n)?n.toLocaleString('es-ES',{style:'currency',currency:'EUR'}):'No confirmado';
+  const filters=[
+    {key:'review',label:'Necesitan revisión'},
+    {key:'active',label:'Activos'},
+    {key:'unsigned',label:'Sin OT firmada'},
+    {key:'noInvoice',label:'Sin factura registrada'},
+    {key:'invoice',label:'Envío por confirmar'},
+    {key:'payment',label:'Por cobrar'},
+    {key:'all',label:'Todos'}
+  ];
+  const predicate={
+    review:r=>r.needsReview,active:r=>r.active,unsigned:r=>r.needsSignature,
+    noInvoice:r=>r.noInvoiceEvidence,invoice:r=>r.needsInvoice,
+    payment:r=>r.needsPayment,all:r=>true
+  }[state.dashboardFilter]||(()=>true);
+  const search=(state.dashboardSearch||'').toLocaleLowerCase('es');
+  const shown=rows.filter(r=>predicate(r)&&`${r.reference} ${r.client} ${r.address} ${r.invoiceRef}`.toLocaleLowerCase('es').includes(search));
+  const stats=[
+    {label:'Trabajos activos',value:counts.active||0,kind:'active'},
+    {label:'Sin firma registrada',value:counts.unsigned||0,kind:'unsigned'},
+    {label:'Sin factura registrada',value:counts.missingInvoice||0,kind:'noInvoice'},
+    {label:'Por cobrar',value:counts.paymentPending||0,kind:'payment'},
+    {label:'Revisión pendiente',value:counts.needsReview||0,kind:'review'}
+  ];
+  const kindState=r=>{
+    const badges=[];
+    if(r.signed)badges.push('<span class="dash-tag ok">OT firmada</span>');
+    else if(r.needsSignature)badges.push('<span class="dash-tag warn">Firma no registrada</span>');
+    if(r.invoiceSent)badges.push('<span class="dash-tag ok">Envío confirmado</span>');
+    else if(r.invoiceRef)badges.push('<span class="dash-tag neutral">Ref. factura · envío por confirmar</span>');
+    else if(r.noInvoiceEvidence)badges.push('<span class="dash-tag warn">Sin factura registrada</span>');
+    if(r.paymentConfirmed)badges.push(`<span class="dash-tag ${r.paymentNeedsReconcile?'warn':'ok'}">Cobro verificado${r.paymentNeedsReconcile?' · conciliar':''}</span>`);
+    else if(r.paidInCrm)badges.push('<span class="dash-tag ok">Cobrado según CRM</span>');
+    else if(r.needsPayment)badges.push('<span class="dash-tag warn">Cobro por confirmar</span>');
+    return badges.join('');
+  };
+  layout(`<div class="topbar"><div class="titleblock"><span class="eyebrow">Solo administración ASSA</span><h1>Panel de dirección</h1><p>Seguimiento de trabajos, órdenes firmadas, facturas y cobros registrados en Airtable.</p></div><span class="chip">● Datos de Airtable</span></div>
+    <section class="dash-kpis">${stats.map(x=>`<button type="button" class="dash-kpi ${state.dashboardFilter===x.kind?'selected':''}" data-dash-filter="${x.kind}"><span>${h(x.label)}</span><strong>${Number(x.value)}</strong></button>`).join('')}</section>
+    <div class="pale dash-disclaimer">Se han revisado <strong>${Number(scope.operational||0)} trabajos operativos</strong>. Se excluyen ${Number(scope.unclassified||0)} registros históricos sin estado y ${Number(scope.excludedTests||0)} pruebas. «Sin firma» o «sin factura» significa <strong>que no consta en Airtable</strong>, no que el cliente no la haya recibido.</div>
+    <div class="section-head"><h2>Trabajos para revisar</h2><button class="button small light" id="dashRefresh">↻ Actualizar</button></div>
+    <div class="tabs dash-tabs">${filters.map(x=>`<button type="button" class="tab ${state.dashboardFilter===x.key?'active':''}" data-dash-filter="${x.key}">${h(x.label)}</button>`).join('')}</div>
+    <div class="toolbar"><input id="dashSearch" aria-label="Buscar en el panel" placeholder="Buscar cliente, trabajo o factura" value="${h(state.dashboardSearch)}"></div>
+    <div class="dash-list">${shown.length?shown.map(r=>`<article class="dash-job">
+      <div class="dash-job-top"><div><div class="ref">${h(r.reference||'Trabajo ASSA')}</div><h3>${h(r.client||'Cliente no indicado')}</h3><p class="smalltext">📍 ${h(r.address||'Dirección pendiente')} · ${h(r.status)}${r.date?' · 📅 '+h(r.date):''}</p></div><span class="dash-amount">${h(money(r.total))}<small>Importe registrado</small></span></div>
+      <div class="dash-tags">${kindState(r)}</div>
+      <div class="dash-finance"><span>Factura: <strong>${h(r.invoiceRef||'Sin referencia')}</strong></span><span>Cobrado en CRM: <strong>${h(money(r.paid))}</strong></span>${r.paymentState?`<span>Estado CRM: <strong>${h(r.paymentState)}</strong></span>`:''}${r.otNumber?`<span>OT: <strong>${h(r.otNumber)}</strong></span>`:''}</div>
+      ${r.anomalies?.length?`<div class="warning">${r.anomalies.map(a=>h(a)).join(' · ')}</div>`:''}
+      <div class="dash-controls"><label><input type="checkbox" data-dashboard-confirm="invoiceSent" data-id="${h(r.id)}" ${r.invoiceSent?'checked':''}> Factura enviada</label><label><input type="checkbox" data-dashboard-confirm="paymentConfirmed" data-id="${h(r.id)}" ${r.paymentConfirmed?'checked':''}> Cobro confirmado</label></div>
+      <div class="dash-card-actions"><button type="button" class="button small light" data-open-dashboard="${h(r.id)}">Ver trabajo</button>${r.signedPdf?`<a class="button small ghost" href="${h(r.signedPdf)}" target="_blank" rel="noopener noreferrer">📄 OT firmada</a>`:''}</div>
+    </article>`).join(''):'<div class="empty"><div class="symbol">✓</div><h3>No hay trabajos en este filtro</h3><p>Prueba con otra categoría o modifica la búsqueda.</p></div>'}</div>
+    <p class="smalltext dash-disclaimer-bottom">Las casillas son controles administrativos independientes. No crean ni editan facturas, importes cobrados o transferencias. Un cobro confirmado sin conciliación de importes queda señalado para revisar.</p>`);
+  el.querySelector('#dashRefresh').addEventListener('click',async e=>{busy(e.target,true);try{await loadDashboard();renderDashboard();toast('Panel actualizado desde Airtable.');}catch(err){toast(err.message,true);}finally{busy(e.target,false);}});
+  el.querySelectorAll('[data-dash-filter]').forEach(b=>b.addEventListener('click',()=>{state.dashboardFilter=b.dataset.dashFilter;renderDashboard();}));
+  el.querySelector('#dashSearch').addEventListener('input',e=>{state.dashboardSearch=e.target.value;const pos=e.target.selectionStart;renderDashboard();const input=el.querySelector('#dashSearch');input.focus();input.setSelectionRange(pos,pos);});
+  el.querySelectorAll('[data-open-dashboard]').forEach(b=>b.addEventListener('click',()=>openJob(b.dataset.openDashboard)));
+  el.querySelectorAll('[data-dashboard-confirm]').forEach(input=>input.addEventListener('change',async e=>{
+    const field=e.target.dataset.dashboardConfirm,id=e.target.dataset.id,checked=e.target.checked;
+    const r=(state.dashboard.rows||[]).find(x=>x.id===id);
+    let message=field==='invoiceSent'?'Confirmar que ya has enviado la factura al cliente. No se genera ni envía una factura desde aquí.':'Confirmar manualmente que el cliente ha pagado. Este control NO actualiza el importe cobrado ni modifica la factura.';
+    if(field==='invoiceSent'&&checked&&!r?.invoiceRef)message+=' ATENCIÓN: en Airtable todavía no consta una referencia de factura.';
+    if(field==='paymentConfirmed'&&checked&&!r?.paidInCrm)message+=' ATENCIÓN: el cobro todavía no está conciliado con los importes registrados.';
+    if(!checked)message='¿Quieres retirar esta confirmación administrativa? Los datos originales de facturación y cobro permanecerán intactos.';
+    if(!confirm(message)){e.target.checked=!checked;return;}
+    e.target.disabled=true;
+    try{
+      const result=await api(`/admin/jobs/${id}/confirm`,'PATCH',{field,checked});
+      await loadDashboard();renderDashboard();toast(result.notice||'Control guardado en Airtable.');
+    }catch(err){e.target.checked=!checked;e.target.disabled=false;toast(err.message,true);}
+  }));
+}
 function renderJobs(){const isAdmin=state.me.role==='administrador';let jobs=state.jobs.filter(x=>`${x.reference} ${x.client} ${x.address} ${x.description}`.toLowerCase().includes(state.search.toLowerCase()));if(state.status==='active')jobs=jobs.filter(x=>['Aceptado / Programado','En progreso','Pendiente de visita'].includes(x.status));else jobs=jobs.filter(x=>!['Aceptado / Programado','En progreso','Pendiente de visita'].includes(x.status));
  const active=state.jobs.filter(x=>['Aceptado / Programado','En progreso','Pendiente de visita'].includes(x.status)).length;const completed=state.jobs.length-active;
  layout(`<div class="topbar"><div class="titleblock"><span class="eyebrow">Área de ${isAdmin?'administración':'operarios'}</span><h1>Mis trabajos</h1><p>${isAdmin?'Control de los trabajos de ASSA':'Consulta tus trabajos asignados y registra lo realizado'}</p></div><span class="chip">● Conectado</span></div><section class="kpis"><div class="kpi"><span>Activos</span><strong>${active}</strong></div><div class="kpi"><span>${isAdmin?'Cerrados / otros':'Mis trabajos'}</span><strong>${isAdmin?completed:active}</strong></div><div class="kpi"><span>Visitas</span><strong>↗</strong></div></section><div class="section-head"><h2>Listado de trabajos</h2><button class="button small primary" id="newVisit">+ Visita técnica</button></div>${isAdmin?`<div class="tabs"><button class="tab ${state.status==='active'?'active':''}" data-tab="active">Activos</button><button class="tab ${state.status==='closed'?'active':''}" data-tab="closed">Cerrados / otros</button></div>`:''}<div class="toolbar"><input id="search" placeholder="Buscar cliente, dirección o referencia" value="${h(state.search)}"/></div><div class="list">${jobs.length?jobs.map(job=>`<article class="job-card"><div><div class="ref">${h(job.reference||'Trabajo ASSA')}</div><h3>${h(job.client||'Cliente sin nombre')}</h3><p>📍 ${h(job.address||'Dirección pendiente')}</p><p>🔧 ${h(job.description||'Sin descripción')}</p><div class="foot"><span class="status ${['Aceptado / Programado','En progreso'].includes(job.status)?'on':'off'}">${h(job.status)}</span>${job.date?`<span class="smalltext">📅 ${h(job.date)}</span>`:''}${isAdmin&&job.assigned?`<span class="smalltext">👷 ${h(job.assigned)}</span>`:''}</div></div><button class="button small ${['Terminado','Facturado'].includes(job.status)?'light':'primary'}" data-open="${job.id}">Ver trabajo</button></article>`).join(''):`<div class="empty"><div class="symbol">✓</div><h3>No hay trabajos en este listado</h3><p>${isAdmin?'Cambia el filtro o asigna trabajos a los operarios.':'Cuando te asignen un trabajo, aparecerá aquí.'}</p></div>`}</div>`);
