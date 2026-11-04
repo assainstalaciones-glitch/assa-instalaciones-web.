@@ -15,7 +15,8 @@ test('Se excluyen pruebas de producción y facturas históricas sin estado opera
  assert.equal(data.scope.unclassified,1);
  assert.equal(data.scope.operational,1);
  assert.equal(data.counts.active,1);
- assert.equal(data.counts.unsigned,1);
+ // Un trabajo de antes del portal sin OT vinculada no se anuncia como firma pendiente.
+ assert.equal(data.counts.unsigned,0);
  assert.equal(data.counts.missingInvoice,0);
 });
 test('OT firmada, factura registrada pero envío pendiente de confirmación y cobro parcial',()=>{
