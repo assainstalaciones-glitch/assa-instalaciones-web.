@@ -35,12 +35,13 @@ function renderDashboard(){
     {key:'incomplete',label:'Fichas por completar'},
     {key:'invoice',label:'Envío por confirmar'},
     {key:'payment',label:'Por cobrar'},
+    {key:'closed',label:'Cerrados y cobrados'},
     {key:'all',label:'Todos'}
   ];
   const predicate={
     review:r=>r.needsReview,active:r=>r.active,unsigned:r=>r.needsSignature,
     noInvoice:r=>r.noInvoiceEvidence,incomplete:r=>r.dataIncomplete,invoice:r=>r.needsInvoice,
-    payment:r=>r.needsPayment,all:r=>true
+    payment:r=>r.needsPayment,closed:r=>r.closed,all:r=>true
   }[state.dashboardFilter]||(()=>true);
   const search=(state.dashboardSearch||'').toLocaleLowerCase('es');
   const shown=rows.filter(r=>predicate(r)&&`${r.reference} ${r.client} ${r.address} ${r.invoiceRef}`.toLocaleLowerCase('es').includes(search));
@@ -50,12 +51,15 @@ function renderDashboard(){
     {label:'Facturas sin referencia',value:counts.missingInvoice||0,kind:'noInvoice'},
     {label:'Fichas incompletas',value:counts.incomplete||0,kind:'incomplete'},
     {label:'Por cobrar',value:counts.paymentPending||0,kind:'payment'},
-    {label:'Revisión pendiente',value:counts.needsReview||0,kind:'review'}
+    {label:'Revisión pendiente',value:counts.needsReview||0,kind:'review'},
+    {label:'Cerrados y cobrados',value:counts.closed||0,kind:'closed'}
   ];
   const kindState=r=>{
     const badges=[];
+    if(r.closed)badges.push('<span class="dash-tag ok">Cerrado · cobrado</span>');
     if(r.signed)badges.push('<span class="dash-tag ok">OT firmada</span>');
-    else if(r.needsSignature)badges.push('<span class="dash-tag warn">Firma no registrada</span>');
+    else if(r.needsSignature)badges.push('<span class="dash-tag warn">Firma pendiente en trabajo activo</span>');
+    else if(r.hasArchivedUnsignedOt)badges.push('<span class="dash-tag neutral">OT anterior sin PDF de firma vinculado</span>');
     if(r.invoiceSent)badges.push('<span class="dash-tag ok">Envío confirmado</span>');
     else if(r.invoiceRef)badges.push('<span class="dash-tag neutral">Factura registrada · envío no verificado</span>');
     else if(r.noInvoiceEvidence)badges.push('<span class="dash-tag warn">Factura sin vincular en Airtable</span>');
