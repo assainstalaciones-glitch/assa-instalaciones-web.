@@ -16,7 +16,8 @@ export function workNotesEvidence(notes) {
   const reportedPaid=!explicitlyOpen&&/(?:trabajo (?:terminado|realizado) y (?:pagado|cobrado)|revision terminada y pagada|revision (?:terminada|realizada) y cobrada|factura (?:emitida y )?cobrada integramente|trabajo (?:quedo|esta) (?:terminado y )?pagado|trabajo (?:quedo|esta) (?:terminado y )?cobrado|traslado.*trabajo terminado, cobrado|trabajo terminado, cobrado)/.test(n);
   return {free,reportedPaid};
 }
-export function buildAdminDashboard(jobs,orders) {
+export function buildAdminDashboard(jobs,orders,clients=[]) {
+  const clientById=new Map(clients.map(c=>[c.id,c.fields||{}]));
   const ordersByJob=new Map();
   for(const order of orders){
     const f=order.fields||{};
@@ -36,8 +37,12 @@ export function buildAdminDashboard(jobs,orders) {
     const linked=ordersByJob.get(j.id)||[];
     const signedOrder=linked.find(o=>o.fields?.['Estado parte']==='Firmado / archivado'&&
       (o.fields?.['Parte firmado']||[]).length);
-    const clientName=String(f['Nombre del Cliente']||'').trim();
-    const linkedClient=Array.isArray(f['Cliente'])&&f['Cliente'].length>0;
+    const clientId=Array.isArray(f['Cliente'])?f['Cliente'][0]:null;
+    const linkedClient=!!clientId;
+    const linkedFields=clientById.get(clientId)||{};
+    const clientName=String(f['Nombre del Cliente']||linkedFields['Nombre']||'').trim();
+    const addressFromClient=!f['Dirección']&&!!linkedFields['Dirección'];
+    const address=String(f['Dirección']||linkedFields['Dirección']||'');
     const invoiceRef=String(f['Ref. factura']||'').trim();
     const invoiceSent=!!f['Factura enviada (portal)'];
     const paymentConfirmed=!!f['Cobro confirmado (portal)'];
@@ -75,7 +80,7 @@ export function buildAdminDashboard(jobs,orders) {
     rows.push({
       id:j.id,reference:String(f['Trabajo / referencia']||'Trabajo sin referencia'),
       client:clientName||'Cliente por completar',
-      address:String(f['Dirección']||''),date:f['Fecha prevista']||f['Fecha realizado']||'',
+      address,addressFromClient,date:f['Fecha prevista']||f['Fecha realizado']||'',
       status,invoiceRef,invoiceSent,paymentConfirmed,paymentState,total,paid,
       invoiceConfirmedAt:f['Fecha confirmación envío factura (portal)']||'',
       paymentConfirmedAt:f['Fecha confirmación cobro (portal)']||'',
