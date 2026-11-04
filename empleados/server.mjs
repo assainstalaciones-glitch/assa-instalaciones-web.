@@ -6,6 +6,7 @@ import { createHmac, createHash, randomBytes, scryptSync, timingSafeEqual } from
 import { createSignedWorkPdf } from './signed-pdf.mjs';
 import { buildCommercialOT } from './ot-commercial.mjs';
 import { confirmedBudget, prepareOtFields } from './ot-sync.mjs';
+import { buildAdminDashboard, isTestRecord } from './admin-dashboard.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 10000);
@@ -18,7 +19,7 @@ const ROOTHASH = process.env.BOOTSTRAP_PASSWORD_HASH || '';
 const ready = TOKEN.startsWith('pat') && SECRET.length >= 32 && ROOTUSER && ROOTHASH.startsWith('scrypt$');
 const ACTIVE = new Set(['Aceptado / Programado', 'En progreso', 'Pendiente de visita']);
 const F = {
-  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente' },
+  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado' },
   client:{name:'Nombre',phone:'Teléfono',email:'Email',address:'Dirección'},
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
@@ -268,6 +269,36 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(!info.commercial.priceVerified)missing.push('Importe del presupuesto aceptado y su IVA');
     return json(res,200,{info,number:order?.fields[F.order.number]||'Sin OT numerada',
       missing,signed,editable:admin});
+  }
+
+
+  if(p==='/api/admin/dashboard'&&method==='GET'){
+    reqAdmin(user);
+    const dashFields=[F.job.ref,F.job.name,F.job.address,F.job.state,F.job.total,
+      F.job.collected,F.job.paymentState,F.job.invoiceRef,F.job.invoiceSent,
+      F.job.paymentConfirmed,F.job.invoiceSentAt,F.job.paymentConfirmedAt,
+      F.job.budget,F.job.date,F.job.completedOn];
+    const orderFields=[F.order.job,F.order.state,F.order.pdf,F.order.number];
+    const [jobs,orders]=await Promise.all([
+      list('jobs',dashFields,3000),list('orders',orderFields,3000)
+    ]);
+    return json(res,200,buildAdminDashboard(jobs,orders));
+  }
+  const adminConfirmMatch=p.match(/^\/api\/admin\/jobs\/(rec[A-Za-z0-9]{14})\/confirm$/);
+  if(adminConfirmMatch&&method==='PATCH'){
+    reqAdmin(user);
+    const b=await requestBody(req);
+    if(!['invoiceSent','paymentConfirmed'].includes(b.field)||typeof b.checked!=='boolean')
+      throw failure(400,'Indica la comprobación y el valor verdadero o falso.');
+    const job=await getOne('jobs',adminConfirmMatch[1]);
+    if(!job.fields[F.job.state]||isTestRecord(job.fields))
+      throw failure(400,'Solo se permiten confirmaciones sobre trabajos operativos reales.');
+    const field=b.field==='invoiceSent'?F.job.invoiceSent:F.job.paymentConfirmed;
+    const dateField=b.field==='invoiceSent'?F.job.invoiceSentAt:F.job.paymentConfirmedAt;
+    if(!!job.fields[field]===b.checked)return json(res,200,{ok:true,unchanged:true});
+    await patch('jobs',job.id,{[field]:b.checked,[dateField]:b.checked?new Date().toISOString():null});
+    return json(res,200,{ok:true,field:b.field,checked:b.checked,
+      notice:'Comprobación administrativa guardada. No se han modificado facturas, importes ni estado de cobro.'});
   }
 
   const otPreviewMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/ot$/);
