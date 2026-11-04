@@ -184,13 +184,12 @@ export async function createSignedWorkPdf({number,job={},report={},signer='',add
   page.drawLine({start:{x:X,y:49},end:{x:R,y:49},thickness:.65,color:BORDER});
   str('DOCUMENTO NO VÁLIDO COMO FACTURA',X,37,7.7,bold,BLACK);
   str('Protección de datos: ASSA INSTALACIONES, S.L. · assainstalaciones@gmail.com',X,25,7.0,normal,GRAY);
+  if(receiptHash)str('Ref. verificación: '+clean(receiptHash),X+341,37,6.5,normal,GRAY);
   const annexParts=[];
   if(moreConcept)annexParts.push('MOTIVO / CONCEPTO ADICIONAL:\n'+moreConcept);
   if(moreObservations)annexParts.push('OBSERVACIONES ADICIONALES:\n'+moreObservations);
   if(customerText)annexParts.push('OBSERVACIONES DEL CLIENTE:\n'+customerText);
-  if(receiptHash)annexParts.push('REFERENCIA DE VERIFICACIÓN:\n'+receiptHash);
   if(annexParts.length)addAnnex(annexParts.join('\n\n'),'');
-  const pages=pdf.getPages();
-  if(pages.length>1)pages.forEach((p,i)=>str('')); // Conserva el orden de páginas, con anexo tras la OT.
+  // El PDF firmado conserva la misma primera página del borrador y añade anexo solo si hace falta.
   return Buffer.from(await pdf.save());
 }
