@@ -87,14 +87,30 @@ async function otJobData(job,order){
     description:j[F.job.desc]||o[F.order.title]||'',
     previousNotes:o[F.order.previousNotes]||'',
     orderWork:o[F.order.detail]||'',
-    commercial:buildCommercialOT({
-      description:j[F.job.desc]||'',
-      orderTitle:o[F.order.title]||'',
-      workName:j[F.job.ref]||'',
-      orderBase:o[F.order.base],orderVat:o[F.order.vat],orderTotal:o[F.order.total],
-      jobTotal:j[F.job.total],jobBudget:o[F.order.budget]||j[F.job.budget]||'',
-      status:j[F.job.state]||''
-    }),
+    commercial:(()=>{
+      const quote=confirmedBudget({
+        budget:o[F.order.budget]||j[F.job.budget]||'',
+        status:j[F.job.state]||'',total:j[F.job.total],
+        net:j['Venta neta sin IVA'],description:j[F.job.desc]||''
+      });
+      const candidate=buildCommercialOT({
+        description:j[F.job.desc]||'',orderTitle:o[F.order.title]||'',
+        workName:j[F.job.ref]||'',orderBase:o[F.order.base],
+        orderVat:o[F.order.vat],orderTotal:o[F.order.total],
+        jobTotal:j[F.job.total],jobBudget:o[F.order.budget]||j[F.job.budget]||'',
+        status:j[F.job.state]||''
+      });
+      const conflict=quote.verified&&o[F.order.base]!=null&&
+        (Math.abs(o[F.order.base]-quote.base)>.03||Math.abs((o[F.order.vat]??0)-quote.vat)>.0001);
+      return {
+        ...candidate,base:quote.verified&&!conflict?quote.base:null,
+        vatRate:quote.verified&&!conflict?quote.vat:null,
+        vatAmount:quote.verified&&!conflict?Math.round(quote.base*quote.vat*100)/100:null,
+        total:quote.verified&&!conflict?quote.total:null,
+        priceVerified:quote.verified&&!conflict,
+        source:conflict?'Importe de OT distinto al presupuesto; revisión manual':quote.reason
+      };
+    })(),
     payment:o[F.order.payment]||''
   };
 }
@@ -161,7 +177,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       id:job.id,client:jf[F.job.name],address:jf[F.job.address],
       phone:jf[F.job.phone],email:jf[F.job.email],budget:jf[F.job.budget],
       date:jf[F.job.date],description:jf[F.job.desc],
-      service:jf[F.job.service]
+      service:jf[F.job.service]?.name||''
     };
     const {fields,conflict,reason}=prepareOtFields({
       job:values,existing:existing?existing.fields:null,price
