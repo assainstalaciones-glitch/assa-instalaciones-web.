@@ -16,10 +16,11 @@ const ROOTHASH = process.env.BOOTSTRAP_PASSWORD_HASH || '';
 const ready = TOKEN.startsWith('pat') && SECRET.length >= 32 && ROOTUSER && ROOTHASH.startsWith('scrypt$');
 const ACTIVE = new Set(['Aceptado / Programado', 'En progreso', 'Pendiente de visita']);
 const F = {
-  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', phone:'Número de teléfono', desc:'Descripción del trabajo', date:'Fecha prevista', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente' },
+  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente' },
+  client:{name:'Nombre',phone:'Teléfono',email:'Email',address:'Dirección'},
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
-  order:{job:'Trabajo origen',operator:'Operario',date:'Fecha instalación',client:'Cliente',address:'Dirección',phone:'Teléfono',title:'Motivo del trabajo',detail:'Trabajos a realizar / partidas',state:'Estado parte',pdf:'Parte firmado',number:'Número de orden',internal:'Notas internas'},
+  order:{job:'Trabajo origen',operator:'Operario',date:'Fecha instalación',time:'Hora citada',client:'Cliente',address:'Dirección',city:'Población',postal:'Código postal',phone:'Teléfono',email:'Correo electrónico',taxId:'NIF / DNI',budget:'Nº presupuesto',budgetDate:'Fecha presupuesto',previousNotes:'Observaciones previas',title:'Motivo del trabajo',detail:'Trabajos a realizar / partidas',state:'Estado parte',pdf:'Parte firmado',number:'Número de orden',internal:'Notas internas'},
   visit:{title:'Visita / servicio solicitado',job:'Trabajo existente',client:'Cliente existente',contact:'Contacto por identificar',service:'Servicio',address:'Dirección de la visita',measures:'Mediciones',material:'Materiales y equipos',workers:'Operarios estimados',hours:'Horas estimadas por operario',access:'Incidencias y acceso',photos:'Fotos',notes:'Notas',next:'Siguiente paso',date:'Fecha visita',tech:'Técnico de la visita'}
 };
 const FIELD_PHOTOS = { reports:'fldi3uQwhsfp7anwe', visits:'fldp141UFEZVquqTN' };
@@ -62,6 +63,30 @@ function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failu
 function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
 async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');return job;}
 function jobView(record,admin){const f=record.fields;const data={id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',status:f[F.job.state]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
+async function otJobData(job,order){
+  const j=job.fields||{},o=order?.fields||{};
+  let cl={};
+  const clientId=(j[F.job.client]||[])[0];
+  if(clientId&&validId(clientId)){
+    try{cl=(await getOne('clients',clientId)).fields||{};}
+    catch(error){console.warn('Linked client details unavailable for OT',error.status||'error');}
+  }
+  return {
+    id:job.id,reference:j[F.job.ref]||'',
+    client:o[F.order.client]||j[F.job.name]||cl[F.client.name]||'',
+    address:o[F.order.address]||j[F.job.address]||cl[F.client.address]||'',
+    phone:o[F.order.phone]||j[F.job.phone]||cl[F.client.phone]||'',
+    email:o[F.order.email]||j[F.job.email]||cl[F.client.email]||'',
+    city:o[F.order.city]||'',postal:o[F.order.postal]||'',taxId:o[F.order.taxId]||'',
+    budget:o[F.order.budget]||j[F.job.budget]||'',
+    budgetDate:o[F.order.budgetDate]||'',time:o[F.order.time]||'',
+    service:j[F.job.service]||'',
+    date:o[F.order.date]||j[F.job.date]||'',
+    description:j[F.job.desc]||o[F.order.title]||'',
+    previousNotes:o[F.order.previousNotes]||'',
+    orderWork:o[F.order.detail]||''
+  };
+}
 function reportView(r){const f=r.fields;return {id:r.id,user:f[F.report.user]||'',hours:f[F.report.hours]??'',material:f[F.report.material]||'',notes:f[F.report.notes]||'',date:f[F.report.date]||'',done:!!f[F.report.done],photos:(f[F.report.photos]||[]).map(x=>({id:x.id,filename:x.filename,url:x.thumbnails?.large?.url||x.url}))};}
 function dateMadrid(){const x=new Intl.DateTimeFormat('en-US',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(x.map(p=>[p.type,p.value]));return `${v.year}-${v.month}-${v.day}`;}
 async function attach(table,recordId,fieldId,photo){
@@ -105,24 +130,28 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   const otPreviewMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/ot$/);
   if(otPreviewMatch&&method==='GET'){
     const job=await authorizedJob(otPreviewMatch[1],user);
-    const reports=await list('reports',Object.values(F.report),1000);
+    const [reports,orders]=await Promise.all([
+      list('reports',Object.values(F.report),1000),
+      list('orders',Object.values(F.order),1000)
+    ]);
     const related=reports.filter(x=>(x.fields[F.report.job]||[]).includes(job.id));
     const own=related.find(x=>x.fields[F.report.user]===user.username);
     const chosen=own||(admin?related[0]:null);
-    const details=chosen?.fields||{};
+    const o=orders.find(x=>(x.fields[F.order.job]||[]).includes(job.id)&&x.fields[F.order.state]==='Pendiente de completar')||
+      orders.find(x=>(x.fields[F.order.job]||[]).includes(job.id));
+    const details=chosen?.fields||{},order=o?.fields||{};
     const report={
-      user:details[F.report.user]||user.username,
-      date:details[F.report.date]||dateMadrid(),
+      user:details[F.report.user]||order[F.order.operator]||user.username,
+      date:details[F.report.date]||order[F.order.date]||dateMadrid(),
       hours:details[F.report.hours]??'',
       material:details[F.report.material]||'',
       notes:details[F.report.notes]||''
     };
     const pdf=await createSignedWorkPdf({
-      number:'BORRADOR - SIN FIRMAR',
-      job:{id:job.id,reference:job.fields[F.job.ref],client:job.fields[F.job.name],
-        address:job.fields[F.job.address],description:job.fields[F.job.desc]},
-      report,signer:'',address:job.fields[F.job.address],customerNotes:'',
-      signedAt:new Date().toISOString(),signature:null,receiptHash:''
+      number:order[F.order.number]||'BORRADOR SIN NUMERAR',
+      job:await otJobData(job,o),
+      report,signer:'',address:order[F.order.address]||job.fields[F.job.address],
+      customerNotes:'',signedAt:new Date().toISOString(),signature:null,receiptHash:''
     });
     res.writeHead(200,{
       'Content-Type':'application/pdf',
@@ -178,7 +207,8 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const receiptHash=createHash('sha256').update(JSON.stringify({job:job.id,report:selected.id,signer,address,customerNotes,signedAt})).update(signature).digest('hex').slice(0,24);
     const report={user:selected.fields[F.report.user],date:selected.fields[F.report.date],
       hours:selected.fields[F.report.hours],material:selected.fields[F.report.material],notes:selected.fields[F.report.notes]};
-    let order=related.find(r=>r.fields[F.order.state]==='Pendiente de completar'&&String(r.fields[F.order.internal]||'').includes(reference));
+    let order=related.find(r=>r.fields[F.order.state]==='Pendiente de completar'&&String(r.fields[F.order.internal]||'').includes(reference))||
+      related.find(r=>r.fields[F.order.state]==='Pendiente de completar'&&!(r.fields[F.order.pdf]||[]).length);
     if(!order){
       const fields={
         [F.order.job]:[job.id],[F.order.operator]:report.user||user.username,
@@ -199,8 +229,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(!(current.fields[F.order.pdf]||[]).length){
       const pdf=await createSignedWorkPdf({
         number:current.fields[F.order.number]||order.id,
-        job:{id:job.id,reference:job.fields[F.job.ref],client:job.fields[F.job.name],
-          address:job.fields[F.job.address],description:job.fields[F.job.desc]},
+        job:await otJobData(job,current),
         report,signer,address,customerNotes,signedAt,signature,receiptHash
       });
       if(pdf.length>4.8*1024*1024)throw failure(413,'El parte firmado es demasiado grande.');
