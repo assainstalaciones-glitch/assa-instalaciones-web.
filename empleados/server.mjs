@@ -7,11 +7,12 @@ import { createSignedWorkPdf } from './signed-pdf.mjs';
 import { buildCommercialOT } from './ot-commercial.mjs';
 import { confirmedBudget, prepareOtFields } from './ot-sync.mjs';
 import { buildAdminDashboard, isTestRecord } from './admin-dashboard.mjs';
+import { buildReconciliationView } from './reconciliation-view.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 10000);
 const BASE = process.env.AIRTABLE_BASE_ID || 'appdHOIMfkGPduA83';
-const T = { jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx' };
+const T = { jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx', reconciliationDocs:'tblW53PDguHrrOIs1', reconciliation:'tblMvunG5HhUA1qia' };
 const TOKEN = (process.env.AIRTABLE_TOKEN || '').trim();
 const SECRET = process.env.SESSION_SECRET || '';
 const ROOTUSER = (process.env.BOOTSTRAP_USER || '').trim().toLowerCase();
@@ -271,6 +272,19 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       missing,signed,editable:admin});
   }
 
+
+  // Solo administración puede ver enlaces a facturas, datos fiscales y evidencias.
+  // Etapa piloto: este endpoint no admite escrituras ni altera facturas/cobros.
+  if(p==='/api/admin/reconciliation'&&method==='GET'){
+    reqAdmin(user);
+    const [proposals,documents,jobs,clients]=await Promise.all([
+      list('reconciliation',null,500),
+      list('reconciliationDocs',null,500),
+      list('jobs',[F.job.ref,F.job.name],3000),
+      list('clients',[F.client.name],3000)
+    ]);
+    return json(res,200,buildReconciliationView({proposals,documents,jobs,clients}));
+  }
 
   if(p==='/api/admin/dashboard'&&method==='GET'){
     reqAdmin(user);
