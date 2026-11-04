@@ -20,3 +20,13 @@ Sin AIRTABLE_TOKEN no está operativo el inicio de sesión: la API devuelve 503 
 - Solo tras almacenar el PDF se marca el registro del operario como finalizado y el trabajo como **Terminado**. No modifica la facturación.
 - Administración puede abrir trabajos cerrados y consultar el PDF firmado. Los operarios dejan de ver los trabajos cerrados.
 - La firma se obtiene del cliente presencialmente; nunca la simules en datos de producción. Verifica la primera firma real con una intervención de prueba y comprueba el PDF adjunto en Airtable.
+
+
+## Panel de dirección — solo administración
+- Nueva pestaña **Dirección**, en escritorio y Android, requiere sesión de administrador también en el servidor.
+- Contadores derivados directamente de TRABAJOS y PARTES DE TRABAJO ASSA: activos, trabajos sin PDF de OT firmada registrado, terminados sin factura registrada, envíos no confirmados y cobros pendientes de revisión.
+- Excluye registros históricos sin Estado operativo y pruebas identificadas como tal; sin referencia de factura o firma no equivale a probar que el documento nunca existió.
+- En TRABAJOS se guardan exclusivamente dos controles manuales de administración: `Factura enviada (portal)` y `Cobro confirmado (portal)`, con sus fechas. Los dos campos **no modifican importes, estado de cobro, referencias fiscales ni crean facturas**.
+- Si se marca cobro confirmado pero `Importe cobrado` o `Estado cobro` no concuerdan, se genera una alerta **por conciliar**, no una cifra financiera inventada.
+- Solo administración puede consultar `GET /api/admin/dashboard` o editar `PATCH /api/admin/jobs/:id/confirm`, donde `field` se limita a `invoiceSent` y `paymentConfirmed` y `checked` es booleano.
+- Las cifras son un resumen operativo del estado actual en Airtable, **no contabilidad certificada**. Los trabajos históricos anteriores al portal pueden no tener firma, factura o cobro documentados en estas tablas.
