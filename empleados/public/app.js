@@ -1,5 +1,5 @@
 const el=document.querySelector('#app');
-const state={me:null,jobs:[],employees:[],dashboard:null,dashboardFilter:'review',dashboardSearch:'',page:'jobs',job:null,reports:[],signedParts:[],signedResult:null,otData:null,search:'',status:'active',savedVisit:null};
+const state={me:null,jobs:[],employees:[],dashboard:null,dashboardFilter:'review',dashboardSearch:'',reconciliation:null,reconciliationFilter:'review',reconciliationSearch:'',page:'jobs',job:null,reports:[],signedParts:[],signedResult:null,otData:null,search:'',status:'active',savedVisit:null};
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api=async(path,method='GET',data)=>{const resp=await fetch(`/api${path}`,{method,headers:{'Content-Type':'application/json'},credentials:'same-origin',body:data===undefined?undefined:JSON.stringify(data)});const json=await resp.json().catch(()=>({}));if(!resp.ok)throw new Error(json.error||`Error ${resp.status}`);return json;};
 let toastTimer;function toast(message,error=false){const box=document.querySelector('#toast');box.textContent=message;box.className=error?'visible error':'visible';clearTimeout(toastTimer);toastTimer=setTimeout(()=>box.className='',4600);}
@@ -8,7 +8,7 @@ function field(name,label,value='',type='text',attrs=''){return `<div class="for
 function area(name,label,value='',placeholder=''){return `<div class="form-field"><label for="${name}">${label}</label><textarea id="${name}" name="${name}" placeholder="${h(placeholder)}">${h(value)}</textarea></div>`;}
 function select(name,label,choices,value='',empty='Seleccionar…'){return `<div class="form-field"><label for="${name}">${label}</label><select id="${name}" name="${name}"><option value="">${empty}</option>${choices.map(x=>{const v=typeof x==='string'?x:x.value;const label=typeof x==='string'?x:x.label;return `<option value="${h(v)}" ${v===value?'selected':''}>${h(label)}</option>`;}).join('')}</select></div>`;}
 function formData(form){return Object.fromEntries(new FormData(form).entries());}
-function layout(content){const admin=state.me?.role==='administrador';const nav=[...(admin?[['dashboard','📊','Dirección']]:[]),['jobs','📋','Trabajos'],['visits','📍','Visitas'],...(admin?[['users','👷','Empleados']]:[])];const navButtons=nav.map(([page,ico,label])=>`<button class="navbtn ${state.page===page?'active':''}" data-nav="${page}"><span class="navicon">${ico}</span>${label}</button>`).join('');const bottom=nav.map(([page,ico,label])=>`<button class="${state.page===page?'active':''}" data-nav="${page}"><span>${ico}</span>${label}</button>`).join('');
+function layout(content){const admin=state.me?.role==='administrador';const nav=[...(admin?[['dashboard','📊','Dirección'],['reconciliation','🔎','Conciliación']]:[]),['jobs','📋','Trabajos'],['visits','📍','Visitas'],...(admin?[['users','👷','Empleados']]:[])];const navButtons=nav.map(([page,ico,label])=>`<button class="navbtn ${state.page===page?'active':''}" data-nav="${page}"><span class="navicon">${ico}</span>${label}</button>`).join('');const bottom=nav.map(([page,ico,label])=>`<button class="${state.page===page?'active':''}" data-nav="${page}"><span>${ico}</span>${label}</button>`).join('');
  el.innerHTML=`<div class="layout"><aside class="sidebar"><div class="brand"><span class="brand-logo">A</span><span>ASSA <small style="display:block;font-size:10px;letter-spacing:1px;font-weight:600;color:#9cb9c8">INSTALACIONES</small></span></div>${navButtons}<div class="side-bottom"><strong>${h(state.me?.name||'')}</strong>${admin?'Administración':'Técnico instalador'}<button class="button small" id="logout">Cerrar sesión</button></div></aside><header class="header-mobile"><div class="brand"><span class="brand-logo">A</span> ASSA Instalaciones</div><button id="logoutMobile">Salir</button></header><main class="main">${content}</main><nav class="bottom-nav">${bottom}</nav></div>`;
  el.querySelectorAll('[data-nav]').forEach(btn=>btn.addEventListener('click',()=>navigate(btn.dataset.nav)));el.querySelectorAll('#logout,#logoutMobile').forEach(btn=>btn.addEventListener('click',logout));
 }
@@ -18,10 +18,66 @@ function showLogin(){el.innerHTML=`<div class="login-scene"><div class="login-ar
 }
 async function logout(){await api('/logout','POST').catch(()=>{});state.me=null;showLogin();}
 async function loadDashboard(){state.dashboard=await api('/admin/dashboard');}
+async function loadReconciliation(){state.reconciliation=await api('/admin/reconciliation');}
 async function loadJobs(){state.jobs=(await api('/jobs')).jobs;}
-async function navigate(page){state.page=page;state.job=null;state.savedVisit=null;if(page==='jobs')await loadJobs();if(page==='dashboard')await loadDashboard();if(page==='users'){try{state.employees=(await api('/employees')).employees;}catch(e){toast(e.message,true);}}render();}
-function render(){if(state.page==='dashboard')renderDashboard();else if(state.page==='jobs')renderJobs();else if(state.page==='work')renderWork();else if(state.page==='visits')renderVisits();else if(state.page==='users')renderUsers();else if(state.page==='sign')renderSign();else if(state.page==='signedDone')renderSignedDone();else if(state.page==='otDetails')renderOTDetails();}
+async function navigate(page){state.page=page;state.job=null;state.savedVisit=null;if(page==='jobs')await loadJobs();if(page==='dashboard')await loadDashboard();if(page==='reconciliation')await loadReconciliation();if(page==='users'){try{state.employees=(await api('/employees')).employees;}catch(e){toast(e.message,true);}}render();}
+function render(){if(state.page==='dashboard')renderDashboard();else if(state.page==='reconciliation')renderReconciliation();else if(state.page==='jobs')renderJobs();else if(state.page==='work')renderWork();else if(state.page==='visits')renderVisits();else if(state.page==='users')renderUsers();else if(state.page==='sign')renderSign();else if(state.page==='signedDone')renderSignedDone();else if(state.page==='otDetails')renderOTDetails();}
 
+function renderReconciliation(){
+  if(state.me?.role!=='administrador')return navigate('jobs');
+  const data=state.reconciliation;
+  if(!data)return layout('<section class="panel"><h2>Conciliación no disponible</h2><p>Entra de nuevo en Conciliación para consultar el índice de Airtable.</p></section>');
+  const rows=data.rows||[],counts=data.counts||{},query=(state.reconciliationSearch||'').toLocaleLowerCase('es');
+  const filters=[{value:'review',label:'Para revisar'},{value:'matched',label:'Coincidencias documentales'},{value:'all',label:'Todos'}];
+  const shown=rows.filter(r=>(state.reconciliationFilter==='all'||(state.reconciliationFilter==='review'?r.reviewRequired:!r.reviewRequired))&&
+    [r.client,r.fiscalClient,r.work,r.invoice,r.reviewType].join(' ').toLocaleLowerCase('es').includes(query));
+  const money=n=>typeof n==='number'?n.toLocaleString('es-ES',{style:'currency',currency:'EUR'}):'Sin importe';
+  layout(`<div class="topbar"><div class="titleblock"><span class="eyebrow">Solo administración ASSA</span>
+     <h1>Conciliación documental</h1><p>Facturas de Drive comparadas con clientes y trabajos de Airtable.</p></div><span class="chip">Piloto · Solo lectura</span></div>
+     <section class="dash-kpis recon-kpis">
+       <div class="dash-kpi"><span>Facturas encontradas</span><strong>${Number(counts.proposals||0)}</strong></div>
+       <div class="dash-kpi"><span>Archivos en el índice</span><strong>${Number(counts.documentFiles||0)}</strong></div>
+       <div class="dash-kpi"><span>Coincidencias documentales</span><strong>${Number(counts.documentaryMatches||0)}</strong></div>
+       <div class="dash-kpi"><span>Para revisar</span><strong>${Number(counts.reviewNeeded||0)}</strong></div>
+       <div class="dash-kpi"><span>Copias duplicadas</span><strong>${Number(counts.duplicateFiles||0)}</strong></div>
+     </section>
+     <div class="pale dash-disclaimer"><strong>La factura localizada no significa cobro verificado.</strong>
+       Esta sección muestra coincidencias propuestas y enlaces a documentos originales. Ninguna factura, ficha de cliente, envío ni importe cobrado se modifica aquí.
+       <strong>${Number(counts.bankVerified||0)} cobros</strong> tienen justificante independiente contrastado en este piloto.</div>
+     <div class="section-head"><h2>Documentos y coincidencias</h2><button class="button small light" type="button" id="reconRefresh">↻ Actualizar</button></div>
+     <div class="tabs dash-tabs">${filters.map(t=>`<button type="button" class="tab ${state.reconciliationFilter===t.value?'active':''}" data-recon-filter="${h(t.value)}">${h(t.label)}</button>`).join('')}</div>
+     <div class="toolbar"><input id="reconSearch" placeholder="Buscar factura, cliente o trabajo" aria-label="Buscar conciliación" value="${h(state.reconciliationSearch)}"></div>
+     <div class="dash-list">${shown.length?shown.map(r=>`<article class="dash-job">
+       <div class="dash-job-top"><div><div class="ref">Factura ${h(r.invoice)}</div><h3>${h(r.client)}</h3>
+         <p class="smalltext">${h(r.work)}</p></div><span class="dash-amount">${h(money(r.amount))}<small>Total factura original</small></span></div>
+       <div class="dash-tags">
+         <span class="dash-tag ${r.reviewRequired?'warn':'ok'}">${h(r.result)}</span>
+         ${r.reviewType?`<span class="dash-tag neutral">${h(r.reviewType)}</span>`:''}
+       </div>
+       <div class="dash-finance"><span>Cliente en factura: <strong>${h(r.fiscalClient||'No identificado')}</strong></span>
+         <span>Envío: <strong>${h(r.delivery)}</strong></span>
+         <span>Cobro: <strong>${h(r.payment)}</strong></span></div>
+       <div class="pale recon-reason"><strong>Comprobación:</strong> ${h(r.why)}</div>
+       <div class="dash-card-actions">
+         ${r.url?`<a class="button small light" href="${h(r.url)}" target="_blank" rel="noopener noreferrer">📄 Ver factura original</a>`:''}
+         ${r.workId?`<button type="button" class="button small ghost" data-recon-work="${h(r.workId)}">Ver trabajo</button>`:''}
+       </div>
+     </article>`).join(''):'<div class="empty"><h3>Sin propuestas en este filtro</h3><p>Prueba otra categoría o cambia la búsqueda.</p></div>'}</div>
+     <p class="smalltext dash-disclaimer-bottom">Fuentes: Airtable y documentos existentes de Google Drive. Las revisiones están pendientes de validación por administración. No hay sincronización periódica ni cierre automático de cobros activo.</p>`);
+  el.querySelector('#reconRefresh').addEventListener('click',async ev=>{
+    const btn=ev.currentTarget;busy(btn,true);
+    try{await loadReconciliation();renderReconciliation();toast('Conciliación actualizada desde Airtable.');}
+    catch(err){toast(err.message,true);busy(btn,false);}
+  });
+  el.querySelectorAll('[data-recon-filter]').forEach(btn=>btn.addEventListener('click',()=>{
+    state.reconciliationFilter=btn.dataset.reconFilter;renderReconciliation();
+  }));
+  el.querySelector('#reconSearch').addEventListener('input',ev=>{
+    state.reconciliationSearch=ev.target.value;const cursor=ev.target.selectionStart;
+    renderReconciliation();const input=el.querySelector('#reconSearch');input.focus();input.setSelectionRange(cursor,cursor);
+  });
+  el.querySelectorAll('[data-recon-work]').forEach(btn=>btn.addEventListener('click',()=>openJob(btn.dataset.reconWork)));
+}
 function renderDashboard(){
   if(state.me?.role!=='administrador')return navigate('jobs');
   const data=state.dashboard;if(!data)return layout('<section class="panel"><h2>No hay datos cargados</h2><p>Vuelve a entrar en Dirección para consultar Airtable.</p></section>');
