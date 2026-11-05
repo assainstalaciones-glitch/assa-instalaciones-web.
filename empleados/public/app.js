@@ -1,15 +1,17 @@
+import { mapsDestination } from './navigation-address.js';
 const el=document.querySelector('#app');
 const state={me:null,jobs:[],employees:[],dashboard:null,dashboardFilter:'review',dashboardSearch:'',reconciliation:null,reconciliationFilter:'review',reconciliationSearch:'',page:'jobs',job:null,reports:[],signedParts:[],signedResult:null,otData:null,search:'',status:'active',savedVisit:null};
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function jobContactActions(job,compact=false){
  const address=String(job?.address||'').trim();
+ const destination=mapsDestination(address,job?.mapsAddress||'');
  const rawPhone=String(job?.phone||'').trim();
  const phone=rawPhone.split(/[\/;,]|\s+y\s+/i)[0].replace(/[^\d+]/g,'').replace(/(?!^)\+/g,'');
- const hasAddress=!!address&&!/^(?:por confirmar|a confirmar|pendiente.*|sin direcci[oó]n.*|direcci[oó]n pendiente.*|direcci[oó]n no registrada.*|-+)$/i.test(address);
+ const hasAddress=!!destination&&!/^(?:por confirmar|a confirmar|pendiente.*|sin direcci[oó]n.*|direcci[oó]n pendiente.*|direcci[oó]n no registrada.*|-+)$/i.test(destination);
  const hasPhone=/^\+?\d{9,15}$/.test(phone);
  if(!hasAddress&&!hasPhone)return '';
- return `<div class="quick-contact${compact?' compact':''}" aria-label="Accesos rápidos del cliente">${hasAddress?`<a class="button light ${compact?'small':''}" href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer" aria-label="Cómo llegar a ${h(address)}">📍 Cómo llegar</a>`:''}${hasPhone?`<a class="button ghost ${compact?'small':''}" href="tel:${h(phone)}" aria-label="Llamar a ${h(rawPhone)}">📞 Llamar</a>`:''}</div>`;
+ return `<div class="quick-contact${compact?' compact':''}" aria-label="Accesos rápidos del cliente">${hasAddress?`<a class="button light ${compact?'small':''}" href="https://www.google.com/maps/dir/?api=1&amp;destination=${encodeURIComponent(destination)}" target="_blank" rel="noopener noreferrer" aria-label="Cómo llegar a ${h(destination)}">📍 Cómo llegar</a>`:''}${hasPhone?`<a class="button ghost ${compact?'small':''}" href="tel:${h(phone)}" aria-label="Llamar a ${h(rawPhone)}">📞 Llamar</a>`:''}</div>`;
 }
 const api=async(path,method='GET',data)=>{const resp=await fetch(`/api${path}`,{method,headers:{'Content-Type':'application/json'},credentials:'same-origin',body:data===undefined?undefined:JSON.stringify(data)});const json=await resp.json().catch(()=>({}));if(!resp.ok)throw new Error(json.error||`Error ${resp.status}`);return json;};
 let toastTimer;function toast(message,error=false){const box=document.querySelector('#toast');box.textContent=message;box.className=error?'visible error':'visible';clearTimeout(toastTimer);toastTimer=setTimeout(()=>box.className='',4600);}
