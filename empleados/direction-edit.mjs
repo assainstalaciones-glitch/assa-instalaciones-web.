@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 export const AUDIT_FIELD='Historial dirección (portal)';
-export const JOB_EDIT_FIELDS={client:'Nombre del Cliente',address:'Dirección',phone:'Número de teléfono',email:'Correo electrónico',description:'Descripción del trabajo',date:'Fecha prevista',start:'Hora inicio prevista (portal)',end:'Hora fin prevista (portal)',assigned:'Operarios asignados portal'};
+export const JOB_EDIT_FIELDS={installationUnits:'Unidades instalación colaborador (portal)',executedOn:'Fecha ejecución colaborador (portal)',client:'Nombre del Cliente',address:'Dirección',phone:'Número de teléfono',email:'Correo electrónico',description:'Descripción del trabajo',date:'Fecha prevista',start:'Hora inicio prevista (portal)',end:'Hora fin prevista (portal)',assigned:'Operarios asignados portal'};
 export const REPORT_EDIT_FIELDS={hours:'Horas reales',date:'Fecha trabajo',material:'Material utilizado',notes:'Observaciones'};
 export {changedJobFields} from './public/edit-fields.js';
 export function editVersion(job,reports){return createHash('sha256').update(JSON.stringify({job:job.fields,reports:reports.map(r=>({id:r.id,fields:r.fields})).sort((a,b)=>a.id.localeCompare(b.id))})).digest('hex');}

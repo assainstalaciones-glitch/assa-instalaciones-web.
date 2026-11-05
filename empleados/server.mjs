@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { INSTALLATION_MODE, INSTALLATION_FIELDS as I } from './public/partner-installations.js';
+import { partnerSummary } from './partner-summary.mjs';
 import { REL_FIELDS, relationshipView, relationshipVersion } from './public/relationships.js';
 import { prepareRelationships } from './relationships.mjs';
 import { OUTCOME_FIELD, OUTCOMES, outcomeOption, outcomeVersion } from './public/outcomes.js';
@@ -26,7 +28,7 @@ const ROOTHASH = process.env.BOOTSTRAP_PASSWORD_HASH || '';
 const ready = TOKEN.startsWith('pat') && SECRET.length >= 32 && ROOTUSER && ROOTHASH.startsWith('scrypt$');
 const ACTIVE = new Set(['Aceptado / Programado', 'En progreso', 'Pendiente de visita']);
 const F = {
-  job:{ ...REL_FIELDS, ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado', audit:AUDIT_FIELD, outcome:OUTCOME_FIELD },
+  job:{ ...REL_FIELDS, installationMode:I.mode, installationUnits:I.units, executedOn:I.executedOn, ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado', audit:AUDIT_FIELD, outcome:OUTCOME_FIELD },
   client:{name:'Nombre',phone:'Teléfono',email:'Email',address:'Dirección'},
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
@@ -74,7 +76,7 @@ function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failu
 function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
 async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
 function signedPendingClosure(order,jobId){return (order.fields[F.order.job]||[]).includes(jobId)&&order.fields[F.order.state]==='Firmado / archivado'&&!!order.fields[F.order.pdf]?.length&&reviewEvent(order)?.state==='pending';}
-function jobView(record,admin){const f=record.fields;const data={...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
+function jobView(record,admin){const f=record.fields;const data={partnerInstallation:f[I.mode]===INSTALLATION_MODE,installationUnits:f[I.units]??null,executedOn:f[I.executedOn]||'',...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
 async function otJobData(job,order){
   const j=job.fields||{},o=order?.fields||{};
   let cl={};
@@ -154,12 +156,20 @@ async function approveSignedClosure(job,order,user){const event=reviewEvent(orde
     if(!related.length)throw failure(409,'No hay partes de ejecución para revisar.');
     // Recover a failed report-freeze after the immutable PDF was archived.
     for(const r of related)if(!r.fields[F.report.done])await patch('reports',r.id,{[F.report.done]:true,[F.report.closed]:event.submittedAt});
+    const completedFields={};if(job.fields[I.mode]===INSTALLATION_MODE&&!job.fields[I.executedOn]){const dates=related.map(r=>r.fields[F.report.date]).filter(d=>validDate(d||'')).sort();if(dates.length)completedFields[I.executedOn]=dates.at(-1);}
     const finalStatus=['Facturado','Pendiente de cobro'].includes(job.fields[F.job.state])?job.fields[F.job.state]:'Terminado';
-    await patch('jobs',job.id,{[F.job.state]:finalStatus,[F.job.outcome]:outcomeOption('completed').label});
+    await patch('jobs',job.id,{[F.job.state]:finalStatus,[F.job.outcome]:outcomeOption('completed').label,...completedFields});
     await patch('orders',order.id,{[F.order.internal]:appendReview(order.fields[F.order.internal],{...event,state:'approved',reviewer:user.username,reviewedAt:new Date().toISOString()})});
     const saved=await getOne('orders',order.id),savedJob=await getOne('jobs',job.id);
     if(reviewEvent(saved)?.state!=='approved'||savedJob.fields[F.job.state]!==finalStatus)throw failure(409,'No se ha podido verificar el cierre. Actualiza y revisa.');
     return {ok:true};
+}
+async function approvePartnerInstallation(job,user){
+  const reports=(await list('reports',Object.values(F.report),3000)).filter(r=>(r.fields[F.report.job]||[]).includes(job.id));
+  if(!reports.length||!reports.some(r=>r.fields[F.report.notes]||r.fields[F.report.material]||Number(r.fields[F.report.hours])>0))throw failure(409,'Guarda primero el parte del instalador con lo realizado.');
+  const dates=reports.map(r=>r.fields[F.report.date]).filter(d=>validDate(d||'')).sort();if(!dates.length)throw failure(409,'Completa la fecha real en el parte del instalador.');
+  for(const report of reports)if(!report.fields[F.report.done])await patch('reports',report.id,{[F.report.done]:true,[F.report.closed]:new Date().toISOString()});
+  await patch('jobs',job.id,{[I.executedOn]:dates.at(-1)});
 }
 async function applyOutcome(job,event,user){
   const option=outcomeOption(event.code);if(!option||event.proof!==outcomeProof(event))throw failure(409,'No se ha podido verificar el resultado.');
@@ -168,10 +178,10 @@ async function applyOutcome(job,event,user){
   if(outcomeVersion(current)!==expectedBefore&&outcomeVersion(current)!==expectedAfter)throw failure(409,'El estado ha cambiado desde que se comunicó la visita. Revisa el caso antes de cerrar.');
   const orders=(await list('orders',Object.values(F.order),3000)).filter(o=>(o.fields[F.order.job]||[]).includes(job.id));
   const signed=orders.find(o=>o.fields[F.order.pdf]?.length&&o.fields[F.order.state]==='Firmado / archivado');
-  if(option.signature&&!signed)throw failure(409,'Para marcar trabajo terminado, guarda primero la firma del cliente y su parte.');
+  if(option.signature&&job.fields[I.mode]!==INSTALLATION_MODE&&!signed)throw failure(409,'Para marcar trabajo terminado, guarda primero la firma del cliente y su parte.');
   if(!option.signature&&orders.some(o=>o.fields[F.order.pdf]?.length))throw failure(409,'Hay un parte firmado. Revisa su cierre o añade una rectificación desde dirección.');
   let audit=readAudit(job),entry=audit.find(e=>e.id===event.id);entry.state='applying';await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});
-  if(option.signature)await approveSignedClosure(job,signed,user);
+  if(option.signature){if(job.fields[I.mode]===INSTALLATION_MODE)await approvePartnerInstallation(job,user);else await approveSignedClosure(job,signed,user);}
   await patch('jobs',job.id,{[F.job.state]:target,[F.job.outcome]:option.label});
   const saved=await getOne('jobs',job.id);
   if(saved.fields[F.job.state]!==target||saved.fields[F.job.outcome]!==option.label)throw failure(409,'No se pudo verificar el resultado. Actualiza antes de reintentar.');
@@ -224,7 +234,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(!event){
       if(b.expected!==outcomeVersion(jobView(job,admin)))throw failure(409,'El trabajo ha cambiado. Actualiza antes de comunicar el resultado.');
       if(pendingOutcomes(job).length)throw failure(409,'Ya hay un resultado pendiente de revisión.');
-      if(user.canManageRecords){const documents=(await list('orders',[F.order.job,F.order.pdf,F.order.state],3000)).filter(o=>(o.fields[F.order.job]||[]).includes(job.id));if(option.signature&&!documents.some(o=>o.fields[F.order.pdf]?.length&&o.fields[F.order.state]==='Firmado / archivado'))throw failure(409,'Para marcar trabajo terminado, guarda primero la firma del cliente y su parte.');if(!option.signature&&documents.some(o=>o.fields[F.order.pdf]?.length))throw failure(409,'Hay un parte firmado. Revisa su cierre o añade una rectificación desde dirección.');}
+      if(user.canManageRecords){const documents=(await list('orders',[F.order.job,F.order.pdf,F.order.state],3000)).filter(o=>(o.fields[F.order.job]||[]).includes(job.id));if(option.signature&&job.fields[I.mode]!==INSTALLATION_MODE&&!documents.some(o=>o.fields[F.order.pdf]?.length&&o.fields[F.order.state]==='Firmado / archivado'))throw failure(409,'Para marcar trabajo terminado, guarda primero la firma del cliente y su parte.');if(!option.signature&&documents.some(o=>o.fields[F.order.pdf]?.length))throw failure(409,'Hay un parte firmado. Revisa su cierre o añade una rectificación desde dirección.');}
       event={id,kind:'outcome',code:b.code,reason,by:user.username,at:new Date().toISOString(),before:b.expected,state:user.canManageRecords?'applying':'requested'};event.proof=outcomeProof(event);audit.push(event);await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});
     }
     if(!user.canManageRecords)return json(res,200,{ok:true,pending:true,notice:'Resultado enviado a Samuel. El trabajo y el cobro no se han cerrado automáticamente.'});
@@ -263,10 +273,10 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
         if(value.trim()===String(job.fields[field]??'').trim())continue;
         const max=key==='description'?10000:key==='phone'?50:key==='assigned'?2000:250;
         if(value.length>max)throw failure(400,'El campo «'+field+'» admite hasta '+max+' caracteres; has introducido '+value.length+'.');
-        const cleaned=value.trim();if(['client','description'].includes(key)&&!cleaned)throw failure(400,'El cliente y la descripción no pueden quedar vacíos.');
+        const cleaned=value.trim();if(key==='installationUnits'&&(!/^\d+$/.test(cleaned)||Number(cleaned)<1||Number(cleaned)>100))throw failure(400,'Indica entre 1 y 100 instalaciones.');if(key==='executedOn'&&cleaned&&!validDate(cleaned))throw failure(400,'Fecha de ejecución inválida.');if(['client','description'].includes(key)&&!cleaned)throw failure(400,'El cliente y la descripción no pueden quedar vacíos.');
         if(key==='email'&&cleaned&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned))throw failure(400,'Correo electrónico inválido.');
         if(key==='phone'&&cleaned&&!/^[+()0-9 .\/-]{6,50}$/.test(cleaned))throw failure(400,'Teléfono inválido.');
-        const after=cleaned||null;if((job.fields[field]??null)!==after)changes[field]=after;
+        const after=key==='installationUnits'?Number(cleaned):cleaned||null;if((job.fields[field]??null)!==after)changes[field]=after;
       }
       const combined={...job.fields,...changes},users=assignedUsers(combined[F.job.assigned]);
       if(Object.hasOwn(changes,F.job.assigned)){
@@ -334,6 +344,11 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(stored.date!==b.date||stored.assigned!==changes[F.job.assigned]||stored.start!==start||stored.end!==end)throw failure(409,'Revisa la planificación: no coincide con el cambio solicitado.');
     return json(res,200,{job:jobView(saved,true),warnings});
   }
+  if(p==='/api/admin/partner-installations'&&method==='GET'){
+    reqAdmin(user);const from=url.searchParams.get('from')||'',to=url.searchParams.get('to')||'',partnerId=url.searchParams.get('partnerId')||'';if(!validDate(from)||!validDate(to)||from>to||(partnerId&&!validId(partnerId)))throw failure(400,'Selecciona colaborador y fechas válidas.');
+    const [jobs,orders]=await Promise.all([list('jobs',Object.values(F.job),3000),list('orders',[F.order.job,F.order.pdf,F.order.state,F.order.internal],3000)]);
+    return json(res,200,partnerSummary(jobs,orders,{from,to,partnerId}));
+  }
   if(p==='/api/collaborators'&&method==='GET'){
     reqAdmin(user);const records=await list('partners',['Nombre','Papel habitual','Notas'],1000);
     return json(res,200,{collaborators:records.map(r=>({id:r.id,name:r.fields.Nombre||'',role:r.fields['Papel habitual']||'',notes:r.fields.Notas||''})).sort((a,b)=>a.name.localeCompare(b.name))});
@@ -364,8 +379,11 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     return json(res,200,{clients:clients.map(c=>({id:c.id,name:c.fields[F.client.name]||'',phone:c.fields[F.client.phone]||'',address:c.fields[F.client.address]||''}))});
   }
   if(p==='/api/appointments'&&method==='POST'){
-    reqAdmin(user);const b=await requestBody(req);
-    if(!/^[a-f0-9-]{36}$/.test(b.operationId||'')||!['installation','visit'].includes(b.kind)||!limit(b.description,220)||!Array.isArray(b.users)||!b.users.length)
+    reqAdmin(user);const b=await requestBody(req),partnerInstallation=b.billingMode==='partner';
+    if(b.billingMode&&!['direct','partner'].includes(b.billingMode))throw failure(400,'Modalidad de encargo no válida.');
+    if(partnerInstallation&&b.kind!=='installation')throw failure(400,'Selecciona instalación para colaborador.');
+    const description=limit(b.description,220)||(partnerInstallation?'Instalación para colaborador':'');
+    if(!/^[a-f0-9-]{36}$/.test(b.operationId||'')||!['installation','visit'].includes(b.kind)||!description||!Array.isArray(b.users)||!b.users.length)
       throw failure(400,'Indica el trabajo, al menos un técnico y el tipo de cita.');
     const reference='AGENDA-'+b.operationId;
     const jobs=await list('jobs',Object.values(F.job),3000);
@@ -377,7 +395,8 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(!b.date||!validTime(b.start)||!validTime(b.end))throw failure(400,'La cita nueva necesita fecha, hora de inicio y fin.');
     const warnings=await checkSlot({date:b.date,start:b.start,end:b.end,users:b.users});
     let client=null,name=limit(b.name,200),phone=limit(b.phone,50),address=limit(b.address,220);
-    if(b.clientId){client=await getOne('clients',b.clientId);name=client.fields[F.client.name]||'';phone=client.fields[F.client.phone]||phone;address=address||client.fields[F.client.address]||'';}
+    if(partnerInstallation){if(!validId(b.relationships?.partnerId))throw failure(400,'Selecciona el colaborador que encarga la instalación.');const partner=await getOne('partners',b.relationships.partnerId);name=partner.fields.Nombre||'';phone='';b.relationships={...b.relationships,partnerRole:'Contratista'};}
+    else if(b.clientId){client=await getOne('clients',b.clientId);name=client.fields[F.client.name]||'';phone=client.fields[F.client.phone]||phone;address=address||client.fields[F.client.address]||'';}
     else{
       if(!name||!/^\+?[0-9 ()-]{9,25}$/.test(phone)||phone.replace(/\D/g,'').length<9)throw failure(400,'Indica nombre y teléfono del contacto, o selecciona un cliente existente.');
       const normalized=x=>String(x||'').replace(/\D/g,'').replace(/^(?:0034|34)(?=\d{9}$)/,'');
@@ -385,12 +404,13 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       if(clients.some(c=>normalized(c.fields[F.client.phone])===normalized(phone)))throw failure(409,'Ese teléfono ya figura en CLIENTES. Selecciona la ficha correcta para evitar duplicados.');
     }
     if(!name||!address)throw failure(400,'Falta el nombre del cliente o la dirección de la instalación.');
-    const fields={[F.job.ref]:reference,[F.job.name]:name,[F.job.phone]:phone,[F.job.address]:address,[F.job.desc]:limit(b.description,220),
+    const fields={[F.job.ref]:reference,[F.job.name]:name,[F.job.phone]:phone,[F.job.address]:address,[F.job.desc]:description,
       [F.job.state]:b.kind==='visit'?'Pendiente de visita':'Aceptado / Programado',[F.job.date]:b.date,[F.job.start]:b.start,[F.job.end]:b.end,[F.job.assigned]:[...new Set(b.users)].join(', ')};
     if(client)fields[F.job.client]=[client.id];
+    if(partnerInstallation){const units=b.units===undefined||b.units===''?1:Number(b.units);if(!Number.isInteger(units)||units<1||units>100)throw failure(400,'Indica entre 1 y 100 instalaciones.');fields[I.mode]=INSTALLATION_MODE;fields[I.units]=units;}
     const relationships=await prepareRelationships(b.relationships||{}, {},{findPartner:id=>getOne('partners',id),findClient:id=>getOne('clients',id)});Object.assign(fields,relationships);
     const created=await create('jobs',fields),saved=await getOne('jobs',created.id);
-    return json(res,201,{job:jobView(saved,true),warnings,notice:client?'Instalación añadida al calendario.':'Cita añadida con contacto por verificar; no se ha creado ni fusionado una ficha de CLIENTES.'});
+    return json(res,201,{job:jobView(saved,true),warnings,notice:partnerInstallation?'Instalación del colaborador guardada sin datos del cliente final.':client?'Instalación añadida al calendario.':'Cita añadida con contacto por verificar; no se ha creado ni fusionado una ficha de CLIENTES.'});
   }
   if(p==='/api/admin/closures'&&method==='GET'){
     reqAdmin(user);
@@ -725,7 +745,7 @@ const server=http.createServer(async(req,res)=>{let writeKey;try{
   if(!['GET','HEAD'].includes(req.method)){
     writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'?'agenda-and-jobs':null;
     if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
-  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'collaborators-occupants-v6'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
+  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'partner-installations-count-v7'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({

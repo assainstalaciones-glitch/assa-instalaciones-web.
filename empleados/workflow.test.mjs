@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import { reviewEvent, appendReview, validDate } from './workflow.mjs';
 import {OUTCOMES,outcomeVersion} from './public/outcomes.js';
 import {REL_FIELDS,relationshipVersion} from './public/relationships.js';
+import {INSTALLATION_FIELDS as I,INSTALLATION_MODE} from './public/partner-installations.js';
 
 test('Fechas reales y auditoría sin migrar notas históricas',()=>{
   assert.equal(validDate('2026-02-30'),false);assert.equal(validDate('2026-11-05'),true);
@@ -208,6 +209,30 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
   await t.test('Agenda nueva conserva separados colaborador, beneficiario, ficha existente y destinatario previsto',async()=>{
     const result=await call('/appointments','samuel','POST',{operationId:'abcdabcd-abcd-4abc-8abc-abcdabcdabcd',kind:'visit',users:['saul'],date:'2026-12-10',start:'09:00',end:'10:00',clientId:beneficiaryId,address:'Obra de ejemplo',description:'Visita derivada',relationships:{partnerId,partnerRole:'Intermediario',occupant:'Beneficiario de ejemplo',occupantRole:'Inquilino',invoiceTo:fiscalId}});
     assert.equal(result.status,201,JSON.stringify(result.data));const fields=tables.tblsVLKBSafEEiUlI.at(-1).fields;assert.deepEqual(fields.Cliente,[beneficiaryId]);assert.deepEqual(fields[REL_FIELDS.partnerId],[partnerId]);assert.deepEqual(fields[REL_FIELDS.invoiceTo],[fiscalId]);assert.equal(Object.hasOwn(fields,'Ref. factura'),false);assert.equal(Object.hasOwn(fields,'Importe cobrado'),false);
+  });
+  let partnerInstallationId;
+  await t.test('Instalación para colaborador: basta dirección y agenda, sin nombre, teléfono ni ficha del cliente final',async()=>{
+    const payload={operationId:'12345678-1234-4123-8123-123456789abc',kind:'installation',billingMode:'partner',users:['saul'],date:'2026-11-06',start:'15:00',end:'16:00',address:'Dirección de la instalación',clientId:beneficiaryId,name:'Dato de cliente final que debe ignorarse',phone:'600999999',relationships:{partnerId}};
+    const result=await call('/appointments','samuel','POST',payload);assert.equal(result.status,201,JSON.stringify(result.data));partnerInstallationId=result.data.job.id;
+    const fields=tables.tblsVLKBSafEEiUlI.find(j=>j.id===partnerInstallationId).fields;assert.equal(fields['Nombre del Cliente'],'Colaborador de ejemplo');assert.equal(fields['Número de teléfono'],'');assert.equal(Object.hasOwn(fields,'Cliente'),false);assert.equal(fields[I.mode],INSTALLATION_MODE);assert.equal(fields[I.units],1);assert.equal(fields[REL_FIELDS.partnerRole],'Contratista');assert.equal(Object.hasOwn(fields,REL_FIELDS.occupant),false);assert.equal(Object.hasOwn(fields,REL_FIELDS.invoiceTo),false);
+    const count=writes.length;assert.equal((await call('/appointments','samuel','POST',payload)).status,200);assert.equal(writes.length,count);
+    assert.equal((await call('/appointments','samuel','POST',{...payload,operationId:'22345678-1234-4123-8123-123456789abc',date:'2026-11-08',units:0})).status,400);
+  });
+  await t.test('Instalador envía instalación terminada sin firma de cliente final y Samuel la incluye al aprobar el parte',async()=>{
+    const reportId='rec00000000000040';tables.tblprtqasdBxVVsNx.push({id:reportId,fields:{Trabajo:[partnerInstallationId],'Usuario operario':'saul','Horas reales':1,Observaciones:'Instalación realizada y probada','Fecha trabajo':'2026-11-07'}});
+    const current=(await call('/jobs/'+partnerInstallationId,'samuel')).data.job,countOrders=tables.tblvZgkNh2cX1bTNx.length;
+    const body={operationId:'32345678-1234-4123-8123-123456789abc',code:'completed',reason:'Instalación realizada y enviada a revisión',expected:outcomeVersion(current)};
+    const request=await call('/jobs/'+partnerInstallationId+'/outcomes','saul','POST',body);assert.equal(request.status,200,JSON.stringify(request.data));assert.equal(request.data.pending,true);
+    const before=(await call('/admin/partner-installations?from=2026-11-01&to=2026-11-15&partnerId='+partnerId,'samuel')).data;assert.equal(before.counts.completedUnits,0);
+    assert.equal((await call('/jobs/'+partnerInstallationId+'/outcomes/outcome-'+body.operationId+'/decision','samuel','POST',{decision:'approve'})).status,200);
+    const fields=tables.tblsVLKBSafEEiUlI.find(j=>j.id===partnerInstallationId).fields;assert.equal(fields.Estado,'Terminado');assert.equal(fields[I.executedOn],'2026-11-07');assert.equal(tables.tblvZgkNh2cX1bTNx.length,countOrders);assert.equal(tables.tblprtqasdBxVVsNx.find(r=>r.id===reportId).fields.Finalizado,true);
+    const beforeReads=writes.length;const summary=await call('/admin/partner-installations?from=2026-11-07&to=2026-11-21&partnerId='+partnerId,'samuel');assert.equal(summary.status,200);assert.equal(summary.data.counts.completedUnits,1);assert.equal(summary.data.counts.toPrepareUnits,1);assert.equal(writes.length,beforeReads);assert.equal((await call('/admin/partner-installations?from=2026-11-01&to=2026-11-15','saul')).status,403);
+  });
+  await t.test('Samuel puede corregir unidades y fecha real con historial para el recuento, sin tocar importes',async()=>{
+    const current=(await call('/jobs/'+partnerInstallationId+'/direction-edit','samuel')).data;
+    const r=await call('/jobs/'+partnerInstallationId+'/direction-edit','samuel','PATCH',{operationId:'42345678-1234-4123-8123-123456789abc',expected:current.version,reason:'Dos instalaciones en la misma dirección; confirmar fecha real',changes:{installationUnits:'2',executedOn:'2026-11-08'}});
+    assert.equal(r.status,200,JSON.stringify(r.data));const summary=(await call('/admin/partner-installations?from=2026-11-08&to=2026-11-22&partnerId='+partnerId,'samuel')).data;assert.equal(summary.counts.completedJobs,1);assert.equal(summary.counts.completedUnits,2);assert.equal(summary.counts.toPrepareUnits,2);
+    assert.equal((await call('/admin/partner-installations?from=2026-11-07&to=2026-11-07&partnerId='+partnerId,'samuel')).data.counts.completedUnits,0);
   });
   await t.test('Desactivar técnico revoca acceso; rol desconocido no autentica',async()=>{
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=false;assert.equal((await call('/me')).status,401);
