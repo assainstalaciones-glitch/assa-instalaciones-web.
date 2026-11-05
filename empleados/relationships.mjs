@@ -4,7 +4,8 @@ const validId=id=>/^rec[A-Za-z0-9]{14}$/.test(id||'');
 export async function prepareRelationships(input,current,{findPartner,findClient}){
  if(!input||typeof input!=='object'||Array.isArray(input))throw invalid('Relaciones del trabajo no válidas.');
  const fields={};
- for(const key of Object.keys(input))if(!Object.hasOwn(REL_FIELDS,key)||key==='partnerName')throw invalid('Campo de relación no permitido.');
+ for(const key of Object.keys(input))if((!Object.hasOwn(REL_FIELDS,key)&&key!=='partnerOther')||key==='partnerName')throw invalid('Campo de relación no permitido.');
+ if(Object.hasOwn(input,'partnerOther')&&(typeof input.partnerOther!=='string'||input.partnerOther.length>180))throw invalid('La referencia del colaborador admite hasta 180 caracteres.');
  for(const key of ['occupant','occupantRole','accessPhone'])if(Object.hasOwn(input,key)){
   if(typeof input[key]!=='string'||input[key].length>(key==='accessPhone'?50:250))throw invalid('Revisa el contacto del inmueble.');
   const value=input[key].trim();if(key==='occupantRole'&&value&&!OCCUPANT_ROLES.includes(value))throw invalid('Selecciona la relación del ocupante con el inmueble.');
@@ -13,13 +14,14 @@ export async function prepareRelationships(input,current,{findPartner,findClient
  }
  let partnerId=current[REL_FIELDS.partnerId]?.[0]||'';
  if(Object.hasOwn(input,'partnerId')){
-  partnerId=input.partnerId;if(typeof partnerId!=='string'||(partnerId&&!validId(partnerId)))throw invalid('Selecciona un colaborador válido.');
+  partnerId=input.partnerId;if(typeof partnerId!=='string'||(partnerId&&partnerId!=='other'&&!validId(partnerId)))throw invalid('Selecciona un colaborador válido.');
   if(!partnerId){fields[REL_FIELDS.partnerId]=[];fields[REL_FIELDS.partnerName]=null;fields[REL_FIELDS.partnerRole]=null;}
+  else if(partnerId==='other'){fields[REL_FIELDS.partnerId]=[];fields[REL_FIELDS.partnerName]=input.partnerOther?.trim()?'Otro · '+input.partnerOther.trim()+' (por confirmar)':'Otro colaborador / por confirmar';fields[REL_FIELDS.partnerRole]=null;}
   else{const partner=await findPartner(partnerId);if(!partner?.fields?.Nombre)throw invalid('Colaborador no disponible.');fields[REL_FIELDS.partnerId]=[partnerId];fields[REL_FIELDS.partnerName]=partner.fields.Nombre;fields[REL_FIELDS.partnerRole]=Object.hasOwn(input,'partnerRole')?input.partnerRole:partner.fields['Papel habitual'];}
  }
- if(Object.hasOwn(input,'partnerRole')&&partnerId)fields[REL_FIELDS.partnerRole]=input.partnerRole;
+ if(Object.hasOwn(input,'partnerRole')&&partnerId&&partnerId!=='other')fields[REL_FIELDS.partnerRole]=input.partnerRole;
  if(Object.hasOwn(input,'partnerRole')&&!partnerId&&input.partnerRole)throw invalid('Selecciona primero un colaborador.');
- if(partnerId&&Object.hasOwn(fields,REL_FIELDS.partnerRole)&&!PARTNER_ROLES.includes(fields[REL_FIELDS.partnerRole]))throw invalid('Indica si actúa como intermediario o contratista en este encargo.');
+ if(partnerId&&partnerId!=='other'&&Object.hasOwn(fields,REL_FIELDS.partnerRole)&&!PARTNER_ROLES.includes(fields[REL_FIELDS.partnerRole]))throw invalid('Indica si actúa como intermediario o contratista en este encargo.');
  if(Object.hasOwn(input,'invoiceTo')){
   const id=input.invoiceTo;if(typeof id!=='string'||(id&&!validId(id)))throw invalid('Selecciona un destinatario previsto válido.');
   if(id)await findClient(id);fields[REL_FIELDS.invoiceTo]=id?[id]:[];

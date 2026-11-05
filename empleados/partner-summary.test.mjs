@@ -1,6 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {partnerSummary} from './partner-summary.mjs';import {INSTALLATION_FIELDS as I,INSTALLATION_MODE,fifteenDayRange} from './public/partner-installations.js';import {REL_FIELDS as R} from './public/relationships.js';import {AUDIT_FIELD} from './direction-edit.mjs';
 const partner='rec00000000000010';
 const job=(id,extra={})=>({id,fields:{[I.mode]:INSTALLATION_MODE,[I.units]:1,[R.partnerId]:[partner],[R.partnerName]:'Colaborador de ejemplo','Fecha prevista':'2026-11-06',Dirección:'Obra de ejemplo',Estado:'Terminado',[I.executedOn]:'2026-11-06',[AUDIT_FIELD]:JSON.stringify([{kind:'outcome',code:'completed',state:'approved',reviewedBy:'samuel'}]),...extra}});
+test('Otro sin identidad resuelta se mantiene visible por revisar y no se atribuye al recuento para factura',()=>{
+ const unknown=job('other',{[R.partnerId]:[],[R.partnerName]:'Otro · referencia por confirmar'});
+ const result=partnerSummary([unknown,job('known')],[],{from:'2026-11-01',to:'2026-11-15',partnerId:'other'});
+ assert.equal(result.rows.length,1);assert.equal(result.counts.toPrepareUnits,0);assert.equal(result.counts.completedUnits,0);assert.equal(result.counts.reviewJobs,1);assert.match(result.rows[0].label,/colaborador y facturación por confirmar/);
+});
 test('El recuento usa ejecución real y aprobación, no fecha prevista ni datos del cliente final',()=>{
  const data=partnerSummary([job('1',{[I.units]:2}),job('2',{'Fecha prevista':'2026-11-06',[I.executedOn]:'2026-11-16'}),job('3',{Estado:'Aceptado / Programado',[I.executedOn]:null,[AUDIT_FIELD]:null}),job('4',{Estado:'Cancelado'})],[],{from:'2026-11-01',to:'2026-11-15',partnerId:partner});
  assert.equal(data.counts.completedJobs,1);assert.equal(data.counts.completedUnits,2);assert.equal(data.counts.toPrepareUnits,2);assert.equal(data.counts.plannedJobs,1);assert.equal(data.counts.notDoneJobs,1);assert.equal(data.rows.some(r=>r.id==='2'),false);

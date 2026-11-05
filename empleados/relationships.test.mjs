@@ -1,6 +1,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {prepareRelationships} from './relationships.mjs';import {REL_FIELDS,relationshipView} from './public/relationships.js';
 const partnerId='rec00000000000001',clientId='rec00000000000002';
 const findPartner=async()=>({id:partnerId,fields:{Nombre:'Colaborador de ejemplo','Papel habitual':'Intermediario','Cliente relacionado':[clientId]}});
+test('Otro colaborador conserva referencia sin inventar ficha ni pagador y permite resolverlo después',async()=>{
+ const fields=await prepareRelationships({partnerId:'other',partnerOther:'Encargo de mi primo',partnerRole:'Contratista'}, {},{findPartner:()=>{throw Error('No debe crear ni buscar una identidad');}});
+ assert.deepEqual(fields[REL_FIELDS.partnerId],undefined);assert.equal(fields[REL_FIELDS.partnerName],'Otro · Encargo de mi primo (por confirmar)');assert.equal(fields[REL_FIELDS.partnerRole],undefined);assert.equal(fields[REL_FIELDS.invoiceTo],undefined);
+ const view=relationshipView(fields,true);assert.equal(view.partnerId,'other');assert.equal(view.partnerOther,'Encargo de mi primo');
+ const resolved=await prepareRelationships({partnerId,partnerRole:'Intermediario'},fields,{findPartner});assert.deepEqual(resolved[REL_FIELDS.partnerId],[partnerId]);assert.equal(resolved[REL_FIELDS.partnerName],'Colaborador de ejemplo');assert.equal(resolved[REL_FIELDS.invoiceTo],undefined);
+});
 test('Intermediario, inquilino y cliente fiscal son independientes; el cliente relacionado no se copia al pagador',async()=>{
  let clientReads=0;const fields=await prepareRelationships({partnerId,partnerRole:'Intermediario',occupant:'Inquilina de ejemplo',occupantRole:'Inquilino',accessPhone:'600123456'}, {},{findPartner,findClient:async()=>{clientReads++;}});
  assert.equal(fields[REL_FIELDS.partnerName],'Colaborador de ejemplo');assert.equal(fields[REL_FIELDS.occupant],'Inquilina de ejemplo');assert.equal(Object.hasOwn(fields,REL_FIELDS.invoiceTo),false);assert.equal(Object.hasOwn(fields,'Cliente'),false);assert.equal(clientReads,0);

@@ -12,4 +12,6 @@ La reserva requiere hora de entrada; el fin previsto es opcional. Sin duración 
 
 El parte permite guardar entrada y salida reales en campos separados de la planificación, sin modificar el horario previsto ni calcular cobros. Las horas trabajadas siguen siendo independientes para poder reflejar pausas. No se rellenan horas de partes históricos.
 
-Validación: 72 pruebas automatizadas y pruebas de navegador de reserva sin fin, registro de horas reales, reserva por dirección, parte del técnico, aprobación, recuento, flujo directo y móvil, usando datos simulados.
+«Otro colaborador / por confirmar» permite reservar instalaciones o reparaciones sin ficha de colaborador ni datos finales. Admite una referencia libre opcional. El origen se resuelve después desde las relaciones del mismo trabajo, con motivo e historial, sin duplicarlo ni elegir automáticamente un pagador. Los encargos realizados con colaborador sin resolver aparecen por revisar y quedan fuera del listado para preparar factura hasta resolverlo.
+
+Validación: 75 pruebas automatizadas y pruebas de navegador de reserva con Otro, referencia opcional, reapertura y selección del colaborador definitivo, reserva sin fin, registro de horas reales, reserva por dirección, parte del técnico, aprobación, recuento, flujo directo y móvil, usando datos simulados.
