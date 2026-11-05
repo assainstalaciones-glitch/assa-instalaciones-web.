@@ -86,3 +86,15 @@ Estado visible en Dirección: "Factura vinculada", "Envío documentado", "Cobro 
 6. Activar tarea programada solo después de validar resultado, duplicados y control de permisos.
 
 **Fecha:** 05/11/2026. **Alcance de esta entrega:** diseño documentado, sin activar un escaneo diario y sin escribir documentos fiscales ni estados bancarios.
+
+
+## Piloto de índice y visualización realizado — 05/11/2026
+- Tablas creadas en la base Guía de Trabajo: `DOCUMENTOS VERIFICADOS ASSA` (`tblW53PDguHrrOIs1`), `CONCILIACIONES ASSA` (`tblMvunG5HhUA1qia`).
+- Se indexaron 11 archivos físicos (una copia duplicada de la factura TSS 057-26) y 10 propuestas únicas: 6 coincidencias documentales, 4 para revisar.
+- Identidad e idempotencia: `Clave documento=drive:<fileId>:revision-v1` y `Clave propuesta=match:<workId>:<invoice>:invoice-v1`. Crear o actualizar solo mediante upsert por estas claves; nunca crear nuevos registros sin comprobar.
+- Cada propuesta enlaza una sola factura principal indexada, el trabajo y cliente Airtable y conserva los motivos verificables. La copia física duplicada de TSS está indexada sin generar una segunda conciliación.
+- Estado envío solo `Envío verificado` cuando Gmail muestra el mensaje enviado con adjunto exacto: 073-26 Pilar Gil y 057-26 TSS. El resto: `Sin evidencia de envío`, no `No enviado`.
+- Estado cobro documental distinto del importe anotado: 0 justificantes bancarios contrastados durante este piloto.
+- Endpoint exclusivo administrador `GET /api/admin/reconciliation`; deniega técnicos mediante `reqAdmin(user)`. Nueva pestaña Conciliación, con vistas de propuestas, coincidencias documentales, nombres fiscales, explicaciones y enlaces al PDF original en Drive.
+- **Estado de esta entrega: solo lectura en portal y ninguna automatización periódica de Drive.** El portal NO recibe OAuth de Drive ni tiene permisos para modificar facturas, cobros o fichas desde esta pantalla.
+- Los datos del piloto se cargaron tras consulta autorizada de Drive/Airtable a través de conectores existentes. La actualización automática del índice necesitará una integración autorizada por separado.
