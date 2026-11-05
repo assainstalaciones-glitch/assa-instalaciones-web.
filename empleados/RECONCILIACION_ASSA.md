@@ -98,3 +98,11 @@ Estado visible en Dirección: "Factura vinculada", "Envío documentado", "Cobro 
 - Endpoint exclusivo administrador `GET /api/admin/reconciliation`; deniega técnicos mediante `reqAdmin(user)`. Nueva pestaña Conciliación, con vistas de propuestas, coincidencias documentales, nombres fiscales, explicaciones y enlaces al PDF original en Drive.
 - **Estado de esta entrega: solo lectura en portal y ninguna automatización periódica de Drive.** El portal NO recibe OAuth de Drive ni tiene permisos para modificar facturas, cobros o fichas desde esta pantalla.
 - Los datos del piloto se cargaron tras consulta autorizada de Drive/Airtable a través de conectores existentes. La actualización automática del índice necesitará una integración autorizada por separado.
+
+
+### Revisión administrativa sin aplicación automática
+- Campo `Decisión administración` en CONCILIACIONES ASSA: `Pendiente` (vacío), `Validada sin aplicar` o `Descartada`.
+- `PATCH /api/admin/reconciliation/:id/decision`: protegido por sesión administradora, comprobación de origen y existencia del documento indexado. Solo permite una primera decisión, sin sobrescribir una decisión ya tomada.
+- Guarda usuario en `Revisado por` y la fecha en `Fecha de decisión`. No cambia TRABAJOS, CLIENTES, facturas, envío ni cobro.
+- El usuario confirma expresamente la decisión en pantalla. Rectificaciones posteriores requieren revisión manual de auditoría en Airtable, no un segundo clic accidental.
+- La pestaña Conciliación muestra los filtros Para revisar, Coincidencias documentales, Revisadas y Todos.
