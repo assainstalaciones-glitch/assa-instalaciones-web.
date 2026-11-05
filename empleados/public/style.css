@@ -65,3 +65,29 @@
 .quick-contact .button{min-height:44px;white-space:nowrap}
 .quick-contact.compact{margin-top:12px}
 @media(max-width:600px){.quick-contact .button{flex:1 1 135px}}
+
+/* Calendario mensual y planificación por técnico. */
+@media(min-width:841px){.bottom-nav{display:none}}
+.calendar-toolbar{display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap}
+.calendar-toolbar h2{margin:0;flex:1;text-transform:capitalize}
+.calendar-weekdays,.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.calendar-weekdays span{text-align:center;padding:12px 0;font-size:12px;font-weight:800;color:var(--muted)}
+.calendar-grid{gap:5px}
+.calendar-day{font:inherit;text-align:left;display:flex;flex-direction:column;gap:5px;min-width:0;min-height:112px;padding:9px 7px;border:1px solid var(--border);border-radius:9px;background:#fff;color:var(--text);cursor:pointer;overflow:hidden}
+.calendar-day:hover{border-color:var(--mintdark);background:#f1faf7}
+.calendar-day.occupied{background:#eaf5f1;border-color:#c6dfd5}
+.calendar-day.selected{outline:3px solid #16745e;outline-offset:-3px}
+.calendar-day.other-month{opacity:.5}
+.calendar-day-number{font-weight:800;font-size:14px}
+.calendar-day.today .calendar-day-number{background:#173c50;color:#fff;border-radius:50%;width:25px;height:25px;display:grid;place-items:center}
+.calendar-event{display:block;width:100%;font-size:10px;line-height:1.45;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#135b48}
+.calendar-event.completed{color:#64748b;font-weight:500}
+.calendar-more,.calendar-count{font-size:10px;color:var(--muted)}
+.calendar-count{margin-top:auto;font-weight:750;color:#135b48}
+.calendar-appointment{display:grid;grid-template-columns:120px 1fr;gap:16px}
+.calendar-time{font-size:17px;font-weight:850;color:#13634e;padding-top:8px}
+.calendar-availability{background:#f2f6fa;padding:18px;border-radius:12px;margin-top:20px}
+.calendar-availability h3{font-size:15px;margin-top:0}
+#calendarDay,#appointmentForm{scroll-margin-top:85px}
+[hidden]{display:none!important}
+@media(max-width:600px){.calendar-panel{padding:12px}.calendar-grid{gap:3px}.calendar-day{min-height:90px;padding:6px 3px;border-radius:6px}.calendar-day-number{font-size:12px}.calendar-event{font-size:9px}.calendar-count{font-size:8px}.calendar-toolbar{gap:8px}.calendar-toolbar h2{font-size:18px}.calendar-appointment{grid-template-columns:1fr;gap:0}.calendar-time{font-size:16px}}

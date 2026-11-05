@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { validTime, overlap, assignedUsers } from './public/calendar.js';
 import { reviewEvent, appendReview, validDate, scheduleSnapshot, executionSummary } from './workflow.mjs';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, extname, join, normalize } from 'node:path';
@@ -21,7 +22,7 @@ const ROOTHASH = process.env.BOOTSTRAP_PASSWORD_HASH || '';
 const ready = TOKEN.startsWith('pat') && SECRET.length >= 32 && ROOTUSER && ROOTHASH.startsWith('scrypt$');
 const ACTIVE = new Set(['Aceptado / Programado', 'En progreso', 'Pendiente de visita']);
 const F = {
-  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado' },
+  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado' },
   client:{name:'Nombre',phone:'Teléfono',email:'Email',address:'Dirección'},
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
@@ -67,7 +68,7 @@ function reqAuth(user){if(!user)throw failure(401,'Accede con tu usuario y contr
 function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failure(403,'Solo administración puede realizar esta acción.');}
 function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
 async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');return job;}
-function jobView(record,admin){const f=record.fields;const data={id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',status:f[F.job.state]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
+function jobView(record,admin){const f=record.fields;const data={id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
 async function otJobData(job,order){
   const j=job.fields||{},o=order?.fields||{};
   let cl={};
@@ -84,7 +85,7 @@ async function otJobData(job,order){
     email:o[F.order.email]||j[F.job.email]||cl[F.client.email]||'',
     city:o[F.order.city]||'',postal:o[F.order.postal]||'',taxId:o[F.order.taxId]||'',
     budget:o[F.order.budget]||j[F.job.budget]||'',
-    budgetDate:o[F.order.budgetDate]||'',time:o[F.order.time]||'',
+    budgetDate:o[F.order.budgetDate]||'',time:j[F.job.start]?(j[F.job.start]+(j[F.job.end]?'–'+j[F.job.end]:'')):(o[F.order.time]||''),
     service:j[F.job.service]||'',
     date:o[F.order.date]||j[F.job.date]||'',
     description:j[F.job.desc]||o[F.order.title]||'',
@@ -126,6 +127,15 @@ async function attach(table,recordId,fieldId,photo){
   if(!response.ok){console.error('Airtable upload',response.status);throw failure(502,'No se pudo subir la foto.');}return response.json();
 }
 function loginThrottle(ip){const now=Date.now();const item=attempts.get(ip)||{count:0,until:now+15*60000};if(item.until<now){item.count=0;item.until=now+15*60000;}item.count++;attempts.set(ip,item);return item.count<=10;}
+async function checkSlot({date,start,end,users,exclude}){
+  if(date&&!validDate(date))throw failure(400,'La fecha no es válida.');
+  if((start||end)&&(!date||!validTime(start)||!validTime(end)||start>=end))throw failure(400,'Indica inicio y fin del mismo día, con fin posterior al inicio.');
+  const jobs=await list('jobs',Object.values(F.job),3000);
+  const same=jobs.filter(j=>j.id!==exclude&&ACTIVE.has(j.fields[F.job.state])&&j.fields[F.job.date]===date&&assignedUsers(j.fields[F.job.assigned]).some(u=>users.includes(u)));
+  const conflicts=same.filter(j=>overlap({start,end},{start:j.fields[F.job.start],end:j.fields[F.job.end]}));
+  if(conflicts.length)throw failure(409,'Solape de horario: '+conflicts.map(j=>(j.fields[F.job.name]||'Trabajo')+' '+j.fields[F.job.start]+'–'+j.fields[F.job.end]).join('; '));
+  return same.some(j=>!validTime(j.fields[F.job.start])||!validTime(j.fields[F.job.end]))?['Hay otros trabajos de ese técnico sin horario. Confirma su duración antes de comprometer la franja.']:[];
+}
 async function api(req,res,url){const method=req.method;const p=url.pathname; if(!ready)throw failure(503,'El portal está preparado, pendiente de configurar credenciales seguras y conexión a Airtable.');
   if(method!=='GET')originCheck(req);
   if(p==='/api/login'&&method==='POST'){
@@ -161,7 +171,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const job=await getOne('jobs',scheduleMatch[1]),b=await requestBody(req);
     if(!ACTIVE.has(job.fields[F.job.state]))throw failure(409,'Solo se pueden planificar trabajos abiertos.');
     const prior=scheduleSnapshot(job.fields);
-    if(!b.expected||b.expected.date!==prior.date||b.expected.assigned!==prior.assigned)
+    if(!b.expected||b.expected.date!==prior.date||b.expected.assigned!==prior.assigned||(b.expected.start||'')!==prior.start||(b.expected.end||'')!==prior.end)
       throw failure(409,'La planificación ha cambiado. Actualiza y revisa antes de guardar.');
     if(typeof b.date!=='string'||(b.date&&!validDate(b.date))||!Array.isArray(b.users)||b.users.some(x=>typeof x!=='string'||safeUsername(x)!==x))
       throw failure(400,'Indica una fecha válida y usuarios del equipo.');
@@ -170,11 +180,46 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(b.users.some(x=>!allowed.has(x)))throw failure(400,'Solo se pueden asignar técnicos activos.');
     const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);
     if(orders.some(o=>(o.fields[F.order.job]||[]).includes(job.id)&&(reviewEvent(o)?.state==='pending'||o.fields[F.order.pdf]?.length)))throw failure(409,'Hay un cierre pendiente o un parte firmado protegido.');
-    const changes={[F.job.date]:b.date||null,[F.job.assigned]:[...new Set(b.users)].join(', ')};
+    const start=b.start||'',end=b.end||'';
+    const warnings=await checkSlot({date:b.date,start,end,users:b.users,exclude:job.id});
+    const changes={[F.job.start]:start,[F.job.end]:end,[F.job.date]:b.date||null,[F.job.assigned]:[...new Set(b.users)].join(', ')};
     await patch('jobs',job.id,changes);
     const saved=await getOne('jobs',job.id);
-    if(saved.fields[F.job.date]!==b.date&&!( !saved.fields[F.job.date]&&!b.date)|| (saved.fields[F.job.assigned]||'')!==changes[F.job.assigned])throw failure(409,'Revisa la planificación: no coincide con el cambio solicitado.');
-    return json(res,200,{job:jobView(saved,true)});
+    const stored=scheduleSnapshot(saved.fields);
+    if(stored.date!==b.date||stored.assigned!==changes[F.job.assigned]||stored.start!==start||stored.end!==end)throw failure(409,'Revisa la planificación: no coincide con el cambio solicitado.');
+    return json(res,200,{job:jobView(saved,true),warnings});
+  }
+  if(p==='/api/clients'&&method==='GET'){
+    reqAdmin(user);const clients=await list('clients',Object.values(F.client),3000);
+    return json(res,200,{clients:clients.map(c=>({id:c.id,name:c.fields[F.client.name]||'',phone:c.fields[F.client.phone]||'',address:c.fields[F.client.address]||''}))});
+  }
+  if(p==='/api/appointments'&&method==='POST'){
+    reqAdmin(user);const b=await requestBody(req);
+    if(!/^[a-f0-9-]{36}$/.test(b.operationId||'')||!['installation','visit'].includes(b.kind)||!limit(b.description,220)||!Array.isArray(b.users)||!b.users.length)
+      throw failure(400,'Indica el trabajo, al menos un técnico y el tipo de cita.');
+    const reference='AGENDA-'+b.operationId;
+    const jobs=await list('jobs',Object.values(F.job),3000);
+    const existing=jobs.find(j=>j.fields[F.job.ref]===reference);
+    if(existing)return json(res,200,{job:jobView(existing,true),unchanged:true});
+    const employees=await list('users',Object.values(F.user));
+    const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true&&x.fields[F.user.role]==='tecnico').map(x=>x.fields[F.user.username]));
+    if(b.users.some(x=>!allowed.has(x)))throw failure(400,'Selecciona técnicos activos.');
+    if(!b.date||!validTime(b.start)||!validTime(b.end))throw failure(400,'La cita nueva necesita fecha, hora de inicio y fin.');
+    const warnings=await checkSlot({date:b.date,start:b.start,end:b.end,users:b.users});
+    let client=null,name=limit(b.name,200),phone=limit(b.phone,50),address=limit(b.address,220);
+    if(b.clientId){client=await getOne('clients',b.clientId);name=client.fields[F.client.name]||'';phone=client.fields[F.client.phone]||phone;address=address||client.fields[F.client.address]||'';}
+    else{
+      if(!name||!/^\+?[0-9 ()-]{9,25}$/.test(phone)||phone.replace(/\D/g,'').length<9)throw failure(400,'Indica nombre y teléfono del contacto, o selecciona un cliente existente.');
+      const normalized=x=>String(x||'').replace(/\D/g,'').replace(/^(?:0034|34)(?=\d{9}$)/,'');
+      const clients=await list('clients',[F.client.phone],3000);
+      if(clients.some(c=>normalized(c.fields[F.client.phone])===normalized(phone)))throw failure(409,'Ese teléfono ya figura en CLIENTES. Selecciona la ficha correcta para evitar duplicados.');
+    }
+    if(!name||!address)throw failure(400,'Falta el nombre del cliente o la dirección de la instalación.');
+    const fields={[F.job.ref]:reference,[F.job.name]:name,[F.job.phone]:phone,[F.job.address]:address,[F.job.desc]:limit(b.description,220),
+      [F.job.state]:b.kind==='visit'?'Pendiente de visita':'Aceptado / Programado',[F.job.date]:b.date,[F.job.start]:b.start,[F.job.end]:b.end,[F.job.assigned]:[...new Set(b.users)].join(', ')};
+    if(client)fields[F.job.client]=[client.id];
+    const created=await create('jobs',fields),saved=await getOne('jobs',created.id);
+    return json(res,201,{job:jobView(saved,true),warnings,notice:client?'Instalación añadida al calendario.':'Cita añadida con contacto por verificar; no se ha creado ni fusionado una ficha de CLIENTES.'});
   }
   if(p==='/api/admin/closures'&&method==='GET'){
     reqAdmin(user);
@@ -520,9 +565,9 @@ async function staticFile(req,res,p){if(req.method!=='GET')throw failure(405,'M�
 const writingJobs=new Set();
 const server=http.createServer(async(req,res)=>{let writeKey;try{
   if(!['GET','HEAD'].includes(req.method)){
-    writeKey=/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\//.exec(req.url||'')?.[1];
+    writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'?'agenda-and-jobs':null;
     if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
-  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'direction-agenda-review-v1'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
+  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'monthly-calendar-v2'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({

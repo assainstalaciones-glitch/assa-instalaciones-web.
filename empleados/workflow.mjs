@@ -9,7 +9,7 @@ export function reviewEvent(order) {
 }
 export function appendReview(notes,event){return String(notes||'')+'\n'+REVIEW_PREFIX+JSON.stringify(event);}
 export function validDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value))&&new Date(value).toISOString().slice(0,10)===value;}
-export function scheduleSnapshot(fields){return {date:fields['Fecha prevista']||'',assigned:fields['Operarios asignados portal']||''};}
+export function scheduleSnapshot(fields){return {date:fields['Fecha prevista']||'',assigned:fields['Operarios asignados portal']||'',start:fields['Hora inicio prevista (portal)']||'',end:fields['Hora fin prevista (portal)']||''};}
 export function executionSummary(records){
   return {user:records.map(r=>r.fields['Usuario operario']).join(', '),
     hours:records.reduce((n,r)=>n+Number(r.fields['Horas reales']||0),0),

@@ -36,7 +36,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     if(method==='GET')return Response.json(id?records.find(r=>r.id===id):{records});
     writes.push({table,id,method,fields:body.fields});
     if(method==='PATCH'){const r=records.find(r=>r.id===id);assert.ok(r);Object.assign(r.fields,body.fields);return Response.json(r);}
-    assert.equal(table,'tblvZgkNh2cX1bTNx');const r={id:oid,fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
+    assert.ok(['tblvZgkNh2cX1bTNx','tblsVLKBSafEEiUlI'].includes(table));const r={id:table==='tblvZgkNh2cX1bTNx'?oid:'rec00000000000007',fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
   };
   t.after(()=>{globalThis.fetch=originalFetch;});
   const call=async(path,user='saul',method='GET',data)=>{
@@ -62,13 +62,26 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal((await call('/admin/jobs/'+jid+'/confirm','samuel','PATCH',{field:'paymentConfirmed',checked:false})).status,403);
     assert.equal(writes.length,0);
   });
-  const schedule={users:['saul'],date:'2026-11-06',expected:{date:'2026-11-05',assigned:'saul'}};
+  const schedule={users:['saul'],date:'2026-11-06',start:'09:00',end:'11:00',expected:{date:'2026-11-05',assigned:'saul'}};
   await t.test('Agenda valida fecha, técnico activo y conflicto de edición',async()=>{
     assert.equal((await call('/jobs/'+jid+'/schedule','samuel','PATCH',{...schedule,date:'2026-02-30'})).status,400);
     assert.equal((await call('/jobs/'+jid+'/schedule','samuel','PATCH',{...schedule,users:['nadie']})).status,400);
     assert.equal((await call('/jobs/'+jid+'/schedule','samuel','PATCH',schedule)).status,200);
     assert.equal((await call('/jobs/'+jid+'/schedule','samuel','PATCH',schedule)).status,409);
-    assert.deepEqual(Object.keys(writes[0].fields).sort(),['Fecha prevista','Operarios asignados portal']);
+    assert.deepEqual(Object.keys(writes[0].fields).sort(),['Fecha prevista','Hora fin prevista (portal)','Hora inicio prevista (portal)','Operarios asignados portal']);
+  });
+  await t.test('Instalaciones en el mismo día: rechaza solape y permite una franja posterior; reintento sin duplicados',async()=>{
+    const appointment={operationId:'11111111-1111-4111-8111-111111111111',date:'2026-11-06',start:'10:30',end:'12:00',users:['saul'],name:'Otro cliente',phone:'600123456',address:'Cambrils',description:'Otra instalación',kind:'installation'};
+    assert.equal((await call('/appointments','saul','POST',appointment)).status,403);
+    assert.equal((await call('/appointments','samuel','POST',appointment)).status,409);
+    appointment.start='11:00';const result=await call('/appointments','samuel','POST',appointment);assert.equal(result.status,201,JSON.stringify(result.data));
+    const n=writes.length;assert.equal((await call('/appointments','samuel','POST',appointment)).status,200);assert.equal(writes.length,n);
+    assert.equal(tables.tblsVLKBSafEEiUlI.length,3);assert.equal(result.data.job.start,'11:00');
+  });
+  await t.test('Dos técnicos distintos pueden trabajar en paralelo; fin anterior al inicio se rechaza',async()=>{
+    const appointment={users:['alex'],date:'2026-11-06',start:'09:00',end:'11:00',expected:{date:'',assigned:'alex'}};
+    assert.equal((await call('/jobs/'+other+'/schedule','samuel','PATCH',{...appointment,end:'08:00'})).status,400);
+    assert.equal((await call('/jobs/'+other+'/schedule','samuel','PATCH',appointment)).status,200);
   });
   const signature='data:image/png;base64,'+Buffer.concat([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR2sAAAAASUVORK5CYII=','base64'),Buffer.alloc(150)]).toString('base64');
   await t.test('Firma conserva PDF y parte, deja trabajo abierto para Samuel',async()=>{
@@ -89,7 +102,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     const count=writes.length;
     assert.equal((await call('/jobs/'+jid+'/approve-closure','samuel','POST',{orderId:oid})).status,200);assert.equal(writes.length,count);
     assert.equal(tables.tblsVLKBSafEEiUlI[0].fields.Estado,'Terminado');assert.equal(reviewEvent(tables.tblvZgkNh2cX1bTNx[0]).reviewer,'samuel');
-    assert.equal((await call('/jobs')).data.jobs.length,0);
+    assert.equal((await call('/jobs')).data.jobs.some(j=>j.id===jid),false);
     for(const w of writes)for(const k of Object.keys(w.fields||{}))assert.ok(!/factura|cobro|cobrado|importe/i.test(k));
   });
   await t.test('Desactivar técnico revoca acceso; rol desconocido no autentica',async()=>{
