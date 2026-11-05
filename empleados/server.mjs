@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { REL_FIELDS, relationshipView, relationshipVersion } from './public/relationships.js';
+import { prepareRelationships } from './relationships.mjs';
 import { OUTCOME_FIELD, OUTCOMES, outcomeOption, outcomeVersion } from './public/outcomes.js';
 import { AUDIT_FIELD, JOB_EDIT_FIELDS, REPORT_EDIT_FIELDS, editVersion, readAudit, writeAudit, beforeValues, compatibleValues } from './direction-edit.mjs';
 import { validTime, overlap, assignedUsers } from './public/calendar.js';
@@ -16,7 +18,7 @@ import { buildReconciliationView } from './reconciliation-view.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 10000);
 const BASE = process.env.AIRTABLE_BASE_ID || 'appdHOIMfkGPduA83';
-const T = { jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx', reconciliationDocs:'tblW53PDguHrrOIs1', reconciliation:'tblMvunG5HhUA1qia' };
+const T = { partners:'tblXXBlGHp5UByNj4', jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx', reconciliationDocs:'tblW53PDguHrrOIs1', reconciliation:'tblMvunG5HhUA1qia' };
 const TOKEN = (process.env.AIRTABLE_TOKEN || '').trim();
 const SECRET = process.env.SESSION_SECRET || '';
 const ROOTUSER = (process.env.BOOTSTRAP_USER || '').trim().toLowerCase();
@@ -24,7 +26,7 @@ const ROOTHASH = process.env.BOOTSTRAP_PASSWORD_HASH || '';
 const ready = TOKEN.startsWith('pat') && SECRET.length >= 32 && ROOTUSER && ROOTHASH.startsWith('scrypt$');
 const ACTIVE = new Set(['Aceptado / Programado', 'En progreso', 'Pendiente de visita']);
 const F = {
-  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado', audit:AUDIT_FIELD, outcome:OUTCOME_FIELD },
+  job:{ ...REL_FIELDS, ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado', audit:AUDIT_FIELD, outcome:OUTCOME_FIELD },
   client:{name:'Nombre',phone:'Teléfono',email:'Email',address:'Dirección'},
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
@@ -72,7 +74,7 @@ function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failu
 function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
 async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
 function signedPendingClosure(order,jobId){return (order.fields[F.order.job]||[]).includes(jobId)&&order.fields[F.order.state]==='Firmado / archivado'&&!!order.fields[F.order.pdf]?.length&&reviewEvent(order)?.state==='pending';}
-function jobView(record,admin){const f=record.fields;const data={id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
+function jobView(record,admin){const f=record.fields;const data={...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
 async function otJobData(job,order){
   const j=job.fields||{},o=order?.fields||{};
   let cl={};
@@ -332,6 +334,31 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(stored.date!==b.date||stored.assigned!==changes[F.job.assigned]||stored.start!==start||stored.end!==end)throw failure(409,'Revisa la planificación: no coincide con el cambio solicitado.');
     return json(res,200,{job:jobView(saved,true),warnings});
   }
+  if(p==='/api/collaborators'&&method==='GET'){
+    reqAdmin(user);const records=await list('partners',['Nombre','Papel habitual','Notas'],1000);
+    return json(res,200,{collaborators:records.map(r=>({id:r.id,name:r.fields.Nombre||'',role:r.fields['Papel habitual']||'',notes:r.fields.Notas||''})).sort((a,b)=>a.name.localeCompare(b.name))});
+  }
+  const relationMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/relationships$/);
+  if(relationMatch&&method==='PATCH'){
+    reqAdmin(user);if(user.username!==ROOTUSER)throw failure(403,'La cuenta principal de Samuel debe confirmar las relaciones del trabajo.');
+    const job=await getOne('jobs',relationMatch[1]),b=await requestBody(req),reason=limit(b.reason,800),audit=readAudit(job),id='relationships-'+b.operationId;
+    if(reason.length<5||!/^[-a-f0-9]{36}$/.test(b.operationId||''))throw failure(400,'Indica el motivo de la relación o corrección.');
+    let event=audit.find(e=>e.id===id);
+    if(event){if(event.by!==user.username||event.proof!==directionProof(event))throw failure(409,'No se pudo verificar esta modificación.');if(event.state==='applied')return json(res,200,{ok:true,unchanged:true});}
+    if(!event){
+      if(b.expected!==relationshipVersion(jobView(job,true)))throw failure(409,'Las relaciones del trabajo han cambiado. Actualiza antes de guardar.');
+      const after=await prepareRelationships(b.relationships,job.fields,{findPartner:id=>getOne('partners',id),findClient:id=>getOne('clients',id)});
+      if(!Object.keys(after).length)throw failure(400,'No hay cambios de colaborador, ocupante o destinatario previsto.');
+      event={id,kind:'relationships',by:user.username,at:new Date().toISOString(),reason,before:beforeValues(job.fields,after),after,reportId:null,reportMode:'none',reportBefore:{},reportAfter:{},state:'pending'};event.proof=directionProof(event);audit.push(event);await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});
+    }
+    if(Object.keys(event.after).some(k=>!Object.values(REL_FIELDS).includes(k)))throw failure(409,'Campo de relación no permitido en el historial.');
+    const current=await getOne('jobs',job.id);if(!compatibleValues(current.fields,event.before,event.after))throw failure(409,'Hay una modificación posterior; no se ha sobrescrito.');
+    await patch('jobs',job.id,event.after);const saved=await getOne('jobs',job.id);
+    if(Object.keys(event.after).some(k=>JSON.stringify(saved.fields[k]??(Array.isArray(event.after[k])?[]:null))!==JSON.stringify(event.after[k])))throw failure(409,'No se pudo verificar la relación guardada.');
+    const history=readAudit(saved),entry=history.find(e=>e.id===event.id);if(!entry)throw failure(409,'No se pudo verificar el historial.');entry.state='applied';entry.appliedAt=new Date().toISOString();await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(history)});
+    const verified=await getOne('jobs',job.id);if(!readAudit(verified).some(e=>e.id===event.id&&e.state==='applied'))throw failure(409,'No se pudo verificar la auditoría de relaciones.');
+    return json(res,200,{ok:true,job:jobView(verified,true),notice:'Colaborador, ocupante y destinatario previsto guardados. Ninguna factura, cobro ni cliente histórico se ha modificado.'});
+  }
   if(p==='/api/clients'&&method==='GET'){
     reqAdmin(user);const clients=await list('clients',Object.values(F.client),3000);
     return json(res,200,{clients:clients.map(c=>({id:c.id,name:c.fields[F.client.name]||'',phone:c.fields[F.client.phone]||'',address:c.fields[F.client.address]||''}))});
@@ -361,6 +388,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const fields={[F.job.ref]:reference,[F.job.name]:name,[F.job.phone]:phone,[F.job.address]:address,[F.job.desc]:limit(b.description,220),
       [F.job.state]:b.kind==='visit'?'Pendiente de visita':'Aceptado / Programado',[F.job.date]:b.date,[F.job.start]:b.start,[F.job.end]:b.end,[F.job.assigned]:[...new Set(b.users)].join(', ')};
     if(client)fields[F.job.client]=[client.id];
+    const relationships=await prepareRelationships(b.relationships||{}, {},{findPartner:id=>getOne('partners',id),findClient:id=>getOne('clients',id)});Object.assign(fields,relationships);
     const created=await create('jobs',fields),saved=await getOne('jobs',created.id);
     return json(res,201,{job:jobView(saved,true),warnings,notice:client?'Instalación añadida al calendario.':'Cita añadida con contacto por verificar; no se ha creado ni fusionado una ficha de CLIENTES.'});
   }
@@ -697,7 +725,7 @@ const server=http.createServer(async(req,res)=>{let writeKey;try{
   if(!['GET','HEAD'].includes(req.method)){
     writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'?'agenda-and-jobs':null;
     if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
-  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'direction-edit-length-fix-v5'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
+  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'collaborators-occupants-v6'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({

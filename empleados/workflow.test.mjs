@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { reviewEvent, appendReview, validDate } from './workflow.mjs';
 import {OUTCOMES,outcomeVersion} from './public/outcomes.js';
+import {REL_FIELDS,relationshipVersion} from './public/relationships.js';
 
 test('Fechas reales y auditoría sin migrar notas históricas',()=>{
   assert.equal(validDate('2026-02-30'),false);assert.equal(validDate('2026-11-05'),true);
@@ -37,7 +38,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     if(method==='GET')return Response.json(id?records.find(r=>r.id===id):{records});
     writes.push({table,id,method,fields:body.fields});
     if(method==='PATCH'){const r=records.find(r=>r.id===id);assert.ok(r);Object.assign(r.fields,body.fields);return Response.json(r);}
-    assert.ok(['tblvZgkNh2cX1bTNx','tblsVLKBSafEEiUlI'].includes(table));const r={id:table==='tblvZgkNh2cX1bTNx'?oid:'rec00000000000007',fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
+    assert.ok(['tblvZgkNh2cX1bTNx','tblsVLKBSafEEiUlI'].includes(table));const r={id:table==='tblvZgkNh2cX1bTNx'?oid:'rec'+String(records.length+100).padStart(14,'0'),fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
   };
   t.after(()=>{globalThis.fetch=originalFetch;});
   const call=async(path,user='saul',method='GET',data)=>{
@@ -188,8 +189,29 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     const r=await call('/jobs/'+jid+'/outcomes','samuel','POST',{code:'completed',reason:'Trabajo revisado y ejecución terminada',operationId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',expected:outcomeVersion(job)});
     assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(JSON.stringify(tables.tblvZgkNh2cX1bTNx[0]),document);assert.equal(tables.tblsVLKBSafEEiUlI[0].fields.Estado,'Terminado');assert.equal(tables.tblsVLKBSafEEiUlI[0].fields['Importe cobrado'],500);
   });
+  const partnerId='rec00000000000010',fiscalId='rec00000000000011',beneficiaryId='rec00000000000012',relationJob='rec00000000000013';
+  tables.tblXXBlGHp5UByNj4=[{id:partnerId,fields:{Nombre:'Colaborador de ejemplo','Papel habitual':'Intermediario','Cliente relacionado':[fiscalId]}}];
+  tables.tblGzayqdlCpz90vx=[{id:fiscalId,fields:{Nombre:'Empresa de ejemplo'}},{id:beneficiaryId,fields:{Nombre:'Beneficiario de ejemplo',Teléfono:'600111222'}}];
+  tables.tblsVLKBSafEEiUlI.push({id:relationJob,fields:{Estado:'En progreso','Operarios asignados portal':'saul',Cliente:[beneficiaryId],'Ref. factura':'FACTURA-CONSERVADA','Importe cobrado':100}});
+  await t.test('Relaciones del encargo: solo Samuel, auditoría, reintento seguro y pagador no deducido del intermediario',async()=>{
+    assert.equal((await call('/collaborators','saul')).status,403);assert.equal((await call('/collaborators','samuel')).data.collaborators[0].name,'Colaborador de ejemplo');
+    const job=(await call('/jobs/'+relationJob,'samuel')).data.job;
+    const payload={operationId:'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',expected:relationshipVersion(job),reason:'Encargo derivado; acceso con la inquilina',relationships:{partnerId,partnerRole:'Intermediario',occupant:'Inquilina de ejemplo',occupantRole:'Inquilino',accessPhone:'600222333'}};
+    assert.equal((await call('/jobs/'+relationJob+'/relationships','saul','PATCH',payload)).status,403);
+    const r=await call('/jobs/'+relationJob+'/relationships','samuel','PATCH',payload);assert.equal(r.status,200,JSON.stringify(r.data));
+    const fields=tables.tblsVLKBSafEEiUlI.find(j=>j.id===relationJob).fields;assert.equal(fields[REL_FIELDS.partnerName],'Colaborador de ejemplo');assert.equal(Object.hasOwn(fields,REL_FIELDS.invoiceTo),false);assert.deepEqual(fields.Cliente,[beneficiaryId]);assert.equal(fields['Ref. factura'],'FACTURA-CONSERVADA');assert.equal(fields['Importe cobrado'],100);
+    const count=writes.length;assert.equal((await call('/jobs/'+relationJob+'/relationships','samuel','PATCH',payload)).status,200);assert.equal(writes.length,count);
+    assert.equal((await call('/jobs/'+relationJob+'/relationships','samuel','PATCH',{...payload,operationId:'ffffffff-ffff-4fff-8fff-ffffffffffff'})).status,409);
+    const current=(await call('/jobs/'+relationJob,'samuel')).data.job;assert.equal((await call('/jobs/'+relationJob+'/relationships','samuel','PATCH',{...payload,operationId:'ffffffff-ffff-4fff-8fff-ffffffffffff',expected:relationshipVersion(current),relationships:{invoiceTo:fiscalId}})).status,200);assert.deepEqual(fields[REL_FIELDS.invoiceTo],[fiscalId]);assert.deepEqual(fields.Cliente,[beneficiaryId]);
+    const tech=(await call('/jobs/'+relationJob,'saul')).data.job;assert.equal(tech.occupant,'Inquilina de ejemplo');assert.equal(tech.accessPhone,'600222333');assert.equal(Object.hasOwn(tech,'invoiceTo'),false);
+  });
+  await t.test('Agenda nueva conserva separados colaborador, beneficiario, ficha existente y destinatario previsto',async()=>{
+    const result=await call('/appointments','samuel','POST',{operationId:'abcdabcd-abcd-4abc-8abc-abcdabcdabcd',kind:'visit',users:['saul'],date:'2026-12-10',start:'09:00',end:'10:00',clientId:beneficiaryId,address:'Obra de ejemplo',description:'Visita derivada',relationships:{partnerId,partnerRole:'Intermediario',occupant:'Beneficiario de ejemplo',occupantRole:'Inquilino',invoiceTo:fiscalId}});
+    assert.equal(result.status,201,JSON.stringify(result.data));const fields=tables.tblsVLKBSafEEiUlI.at(-1).fields;assert.deepEqual(fields.Cliente,[beneficiaryId]);assert.deepEqual(fields[REL_FIELDS.partnerId],[partnerId]);assert.deepEqual(fields[REL_FIELDS.invoiceTo],[fiscalId]);assert.equal(Object.hasOwn(fields,'Ref. factura'),false);assert.equal(Object.hasOwn(fields,'Importe cobrado'),false);
+  });
   await t.test('Desactivar técnico revoca acceso; rol desconocido no autentica',async()=>{
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=false;assert.equal((await call('/me')).status,401);
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=true;tables.tblZURy4PjvmL1Kr0[0].fields.Rol='desconocido';assert.equal((await call('/me')).status,401);
   });
 });
+
