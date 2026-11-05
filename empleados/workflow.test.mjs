@@ -98,6 +98,21 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal((await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',{...correction,operationId:'33333333-3333-4333-8333-333333333333'})).status,409);
     job.fields.Estado='En progreso';
   });
+  await t.test('Regresión descripción de 252 caracteres: corregir el parte no reescribe ni bloquea la descripción existente',async()=>{
+    const job=tables.tblsVLKBSafEEiUlI[0];job.fields['Descripción del trabajo']='d'.repeat(252);
+    const current=(await call('/jobs/'+jid+'/direction-edit','samuel')).data;
+    const b={operationId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',expected:current.version,reason:'Corrección de observaciones',changes:{description:job.fields['Descripción del trabajo']},reportId:rid,reportChanges:{notes:'Observaciones corregidas sin recortar la descripción'}};
+    const r=await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',b);assert.equal(r.status,200,JSON.stringify(r.data));
+    assert.equal(job.fields['Descripción del trabajo'],'d'.repeat(252));assert.equal(Object.hasOwn(JSON.parse(job.fields['Historial dirección (portal)']).at(-1).after,'Descripción del trabajo'),false);
+  });
+  await t.test('La descripción editada admite texto largo sin recorte y los límites identifican el campo',async()=>{
+    const current=(await call('/jobs/'+jid+'/direction-edit','samuel')).data;
+    const b={operationId:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',expected:current.version,reason:'Ampliación de descripción',changes:{description:'Descripción completa. '.repeat(40)}};
+    const r=await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',b);assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(tables.tblsVLKBSafEEiUlI[0].fields['Descripción del trabajo'],b.changes.description.trim());
+    const updated=(await call('/jobs/'+jid+'/direction-edit','samuel')).data,count=writes.length;
+    const invalid=await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',{...b,operationId:'dddddddd-dddd-4ddd-8ddd-dddddddddddd',expected:updated.version,changes:{description:'x'.repeat(10001)}});
+    assert.equal(invalid.status,400);assert.match(invalid.data.error,/Descripción del trabajo/);assert.match(invalid.data.error,/10000/);assert.equal(writes.length,count);
+  });
   const signature='data:image/png;base64,'+Buffer.concat([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR2sAAAAASUVORK5CYII=','base64'),Buffer.alloc(150)]).toString('base64');
   await t.test('Firma conserva PDF y parte, deja trabajo abierto para Samuel',async()=>{
     const r=await call('/jobs/'+jid+'/sign','saul','POST',{signer:'Cliente simulado',accepted:true,signature});

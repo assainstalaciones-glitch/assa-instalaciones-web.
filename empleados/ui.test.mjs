@@ -4,9 +4,10 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import * as calendar from './public/calendar.js';
 import * as outcomes from './public/outcomes.js';
+import {changedJobFields} from './public/edit-fields.js';
 test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>{
   const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',addEventListener(){},querySelector:x=>node(x),querySelectorAll:()=>[],getContext:()=>({fillRect(){}})});return nodes.get(id);};
-  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,...calendar,...outcomes});
+  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,...calendar,...outcomes,changedJobFields});
   const code=readFileSync(new URL('./public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/init\(\);\s*$/,'');
   vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={state,renderAgenda,renderDashboard,renderWork,renderSign,renderDirectionEdit};",context);
   const ui=context.ui,app=node('#app');

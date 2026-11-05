@@ -257,12 +257,14 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       for(const [key,value] of Object.entries(b.changes||{})){
         if(!Object.hasOwn(JOB_EDIT_FIELDS,key))throw failure(400,'Ese campo no se puede editar desde dirección.');
         if(typeof value!=='string')throw failure(400,'Datos de trabajo no válidos.');
-        const max=key==='description'?220:key==='phone'?50:key==='assigned'?2000:250;
-        if(value.length>max)throw failure(400,'Uno de los datos supera la longitud permitida.');
+        const field=JOB_EDIT_FIELDS[key];
+        if(value.trim()===String(job.fields[field]??'').trim())continue;
+        const max=key==='description'?10000:key==='phone'?50:key==='assigned'?2000:250;
+        if(value.length>max)throw failure(400,'El campo «'+field+'» admite hasta '+max+' caracteres; has introducido '+value.length+'.');
         const cleaned=value.trim();if(['client','description'].includes(key)&&!cleaned)throw failure(400,'El cliente y la descripción no pueden quedar vacíos.');
         if(key==='email'&&cleaned&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned))throw failure(400,'Correo electrónico inválido.');
         if(key==='phone'&&cleaned&&!/^[+()0-9 .\/-]{6,50}$/.test(cleaned))throw failure(400,'Teléfono inválido.');
-        const field=JOB_EDIT_FIELDS[key],after=cleaned||null;if((job.fields[field]??null)!==after)changes[field]=after;
+        const after=cleaned||null;if((job.fields[field]??null)!==after)changes[field]=after;
       }
       const combined={...job.fields,...changes},users=assignedUsers(combined[F.job.assigned]);
       if(Object.hasOwn(changes,F.job.assigned)){
@@ -282,7 +284,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
         }
         reportMode=signed||report.fields[F.report.done]?'annotation':'edit';
       }
-      if(!Object.keys(changes).length&&!Object.keys(reportChanges).length)throw failure(400,'No hay cambios que guardar.');
+      if(!Object.keys(changes).length&&!Object.keys(reportChanges).length)throw failure(400,'No hay cambios en la ficha o el parte. Escribir solo el motivo no cambia el trabajo; para indicar que no se realizó, utiliza «Resultado de la visita».');
       event={id:b.operationId,state:'pending',at:new Date().toISOString(),by:user.username,reason,
         before:beforeValues(job.fields,changes),after:changes,reportId:report?.id||null,reportMode,
         reportBefore:report?beforeValues(report.fields,reportChanges):{},reportAfter:reportChanges};
@@ -695,7 +697,7 @@ const server=http.createServer(async(req,res)=>{let writeKey;try{
   if(!['GET','HEAD'].includes(req.method)){
     writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'?'agenda-and-jobs':null;
     if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
-  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'visit-outcomes-v4'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
+  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'direction-edit-length-fix-v5'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({
