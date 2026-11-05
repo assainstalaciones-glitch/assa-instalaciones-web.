@@ -8,4 +8,8 @@ Dirección dispone de un recuento por colaborador y fechas, con acceso a cada tr
 
 El recuento no emite facturas, no confirma pagos y no cambia registros históricos. Los encargos anteriores sin esta modalidad no se incluyen automáticamente. No incluye precios ni genera una factura quincenal.
 
-Validación: 71 pruebas automatizadas y pruebas de navegador de reserva por dirección, parte del técnico, aprobación, recuento, flujo directo y móvil, usando datos simulados.
+La reserva requiere hora de entrada; el fin previsto es opcional. Sin duración conocida la agenda avisa que la disponibilidad requiere comprobarse. No se inventan franjas libres. Se detectan entradas simultáneas y entradas dentro de reservas de duración conocida.
+
+El parte permite guardar entrada y salida reales en campos separados de la planificación, sin modificar el horario previsto ni calcular cobros. Las horas trabajadas siguen siendo independientes para poder reflejar pausas. No se rellenan horas de partes históricos.
+
+Validación: 72 pruebas automatizadas y pruebas de navegador de reserva sin fin, registro de horas reales, reserva por dirección, parte del técnico, aprobación, recuento, flujo directo y móvil, usando datos simulados.

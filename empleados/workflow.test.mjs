@@ -211,6 +211,20 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal(result.status,201,JSON.stringify(result.data));const fields=tables.tblsVLKBSafEEiUlI.at(-1).fields;assert.deepEqual(fields.Cliente,[beneficiaryId]);assert.deepEqual(fields[REL_FIELDS.partnerId],[partnerId]);assert.deepEqual(fields[REL_FIELDS.invoiceTo],[fiscalId]);assert.equal(Object.hasOwn(fields,'Ref. factura'),false);assert.equal(Object.hasOwn(fields,'Importe cobrado'),false);
   });
   let partnerInstallationId;
+  await t.test('Reserva solo con entrada; salida real en parte independiente de la agenda, con validación y permisos',async()=>{
+    const payload={operationId:'92345678-1234-4123-8123-123456789abc',kind:'installation',billingMode:'partner',users:['saul'],date:'2026-12-20',start:'09:00',address:'Dirección sin fin previsto',relationships:{partnerId}};
+    const r=await call('/appointments','samuel','POST',payload);assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.job.end,'');assert.ok(r.data.warnings.length);
+    const id=r.data.job.id;assert.equal((await call('/appointments','samuel','POST',{...payload,operationId:'82345678-1234-4123-8123-123456789abc'})).status,409);
+    assert.equal((await call('/appointments','samuel','POST',{...payload,operationId:'82345678-1234-4123-8123-123456789abc',date:'2026-12-21',end:'08:00'})).status,400);
+    // Existing open technician report avoids manufacturing records outside the HTTP fixture's create contract.
+    tables.tblprtqasdBxVVsNx.push({id:'rec00000000000045',fields:{Trabajo:[id],'Usuario operario':'saul'}});
+    const body={hours:2,date:'2026-12-20',actualStart:'09:05',actualEnd:'11:05',notes:'Instalación realizada',material:''};
+    const saved=await call('/jobs/'+id+'/reports','saul','POST',body);assert.equal(saved.status,200,JSON.stringify(saved.data));assert.equal(saved.data.report.actualEnd,'11:05');assert.equal(saved.data.report.actualStart,'09:05');
+    assert.equal((await call('/jobs/'+id,'samuel')).data.job.end,'');
+    assert.equal((await call('/jobs/'+id+'/reports','alex','POST',body)).status,403);
+    const before=writes.length;assert.equal((await call('/jobs/'+id+'/reports','saul','POST',{...body,actualEnd:'08:00'})).status,400);assert.equal(writes.length,before);
+    const oldClient=await call('/jobs/'+id+'/reports','saul','POST',{hours:2,date:'2026-12-20',notes:'Actualiza notas',material:''});assert.equal(oldClient.data.report.actualEnd,'11:05');
+  });
   await t.test('Instalación para colaborador: basta dirección y agenda, sin nombre, teléfono ni ficha del cliente final',async()=>{
     const payload={operationId:'12345678-1234-4123-8123-123456789abc',kind:'installation',billingMode:'partner',users:['saul'],date:'2026-11-06',start:'15:00',end:'16:00',address:'Dirección de la instalación',clientId:beneficiaryId,name:'Dato de cliente final que debe ignorarse',phone:'600999999',relationships:{partnerId}};
     const result=await call('/appointments','samuel','POST',payload);assert.equal(result.status,201,JSON.stringify(result.data));partnerInstallationId=result.data.job.id;

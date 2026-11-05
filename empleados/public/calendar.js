@@ -2,7 +2,13 @@ export const OPEN_STATUSES=['Aceptado / Programado','En progreso','Pendiente de 
 export function madridToday(){return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
 export function validTime(value){return typeof value==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(value);}
 export function assignedUsers(value){return String(value||'').toLowerCase().split(/[,;\n]/).map(x=>x.trim()).filter(Boolean);}
-export function overlap(a,b){return validTime(a.start)&&validTime(a.end)&&validTime(b.start)&&validTime(b.end)&&a.start<b.end&&b.start<a.end;}
+export function overlap(a,b){
+ if(!validTime(a.start)||!validTime(b.start))return false;
+ if(!a.end&&!b.end)return a.start===b.start;
+ if(!a.end)return validTime(b.end)&&a.start>=b.start&&a.start<b.end;
+ if(!b.end)return validTime(a.end)&&b.start>=a.start&&b.start<a.end;
+ return validTime(a.end)&&validTime(b.end)&&a.start<b.end&&b.start<a.end;
+}
 export function calendarCells(month){
  if(!/^\d{4}-\d{2}$/.test(month))return [];
  const [year,m]=month.split('-').map(Number);if(m<1||m>12)return [];

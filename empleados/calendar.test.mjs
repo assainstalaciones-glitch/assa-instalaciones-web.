@@ -16,4 +16,8 @@ test('Huecos por técnico: combina reservas solapadas e ignora trabajos cerrados
 });
 test('Una reserva sin hora impide presentar disponibilidad como comprobada',()=>{
  assert.equal(dailyGaps([{assigned:'saul',status:'En progreso'}],'saul').unknown,true);
+ assert.equal(dailyGaps([{assigned:'saul',status:'En progreso',start:'09:00',end:''}],'saul').unknown,true);
+ assert.equal(overlap({start:'09:00',end:''},{start:'09:00',end:''}),true);
+ assert.equal(overlap({start:'10:00',end:''},{start:'09:00',end:'11:00'}),true);
+ assert.equal(overlap({start:'09:00',end:''},{start:'11:00',end:''}),false);
 });
