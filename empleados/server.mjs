@@ -67,7 +67,8 @@ async function identify(req){const raw=(req.headers.cookie||'').split(';').map(s
 function reqAuth(user){if(!user)throw failure(401,'Accede con tu usuario y contraseña.');}
 function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failure(403,'Solo administración puede realizar esta acción.');}
 function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
-async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');return job;}
+async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
+function signedPendingClosure(order,jobId){return (order.fields[F.order.job]||[]).includes(jobId)&&order.fields[F.order.state]==='Firmado / archivado'&&!!order.fields[F.order.pdf]?.length&&reviewEvent(order)?.state==='pending';}
 function jobView(record,admin){const f=record.fields;const data={id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
 async function otJobData(job,order){
   const j=job.fields||{},o=order?.fields||{};
@@ -150,7 +151,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   const user=await identify(req);reqAuth(user);const admin=user.role==='administrador';
   if(p==='/api/me'&&method==='GET')return json(res,200,{user});
   if(p==='/api/jobs'&&method==='GET'){
-    const all=await list('jobs',Object.values(F.job),1000);let filtered=all.filter(x=>admin||assigned(x,user));if(!admin)filtered=filtered.filter(x=>ACTIVE.has(x.fields[F.job.state]));
+    const all=await list('jobs',Object.values(F.job),1000);let filtered=all.filter(x=>admin||assigned(x,user));if(!admin){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);const pendingSigned=new Set(orders.filter(o=>o.fields[F.order.state]==='Firmado / archivado'&&!!o.fields[F.order.pdf]?.length&&reviewEvent(o)?.state==='pending').flatMap(o=>o.fields[F.order.job]||[]));filtered=filtered.filter(x=>ACTIVE.has(x.fields[F.job.state])&&!pendingSigned.has(x.id));}
     return json(res,200,{jobs:filtered.map(x=>jobView(x,admin)).sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999'))});
   }
   if(p==='/api/employees'&&method==='GET'){
