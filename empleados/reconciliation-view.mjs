@@ -17,6 +17,7 @@ export function buildReconciliationView({proposals=[],documents=[],jobs=[],clien
     const invoice=field(p,'Número factura')||field(invoiceDoc,'Número factura')||'';
     const total=field(p,'Importe factura');
     const result=field(p,'Resultado')||'Propuesta para revisar';
+    const decision=field(p,'Decisión administración')||'Pendiente';
     const fileKey=field(invoiceDoc,'Clave documento')||field(p,'Documento')||'';
     const docUrl=safeDriveLink(field(invoiceDoc,'Enlace original')||field(p,'Documento URL'));
     return {
@@ -25,14 +26,14 @@ export function buildReconciliationView({proposals=[],documents=[],jobs=[],clien
       client:String(field(client,'Nombre')||field(work,'Nombre del Cliente')||'Cliente sin vincular'),
       fiscalClient:String(field(invoiceDoc,'Cliente fiscal')||''),
       amount:typeof total==='number'?total:null,
-      result:String(result),reviewType:String(field(p,'Tipo revisión')||''),
+      result:String(result),decision:String(decision),reviewedBy:String(field(p,'Revisado por')||''),reviewedAt:String(field(p,'Fecha de decisión')||''),reviewType:String(field(p,'Tipo revisión')||''),
       why:String(field(p,'Motivos')||''),
       delivery:String(field(p,'Estado envío')||'Sin evidencia de envío'),
       payment:String(field(p,'Estado cobro documental')||'Sin datos suficientes'),
       url:docUrl,fileName:String(field(invoiceDoc,'Nombre original')||''),
       fileKey,source:String(field(invoiceDoc,'Origen')||''),
       duplicateCopy:field(invoiceDoc,'Estado documental')==='Copia de otra factura',
-      reviewRequired:result!=='Coincidencia documental'&&result!=='Aplicado'
+      reviewRequired:result!=='Coincidencia documental'&&result!=='Aplicado'&&decision==='Pendiente'
     };
   });
   rows.sort((a,b)=>Number(b.reviewRequired)-Number(a.reviewRequired)||a.invoice.localeCompare(b.invoice));
@@ -40,6 +41,8 @@ export function buildReconciliationView({proposals=[],documents=[],jobs=[],clien
     proposals:rows.length,documentFiles:documents.length,
     documentaryMatches:rows.filter(x=>x.result==='Coincidencia documental').length,
     reviewNeeded:rows.filter(x=>x.reviewRequired).length,
+    approved:rows.filter(x=>x.decision==='Validada sin aplicar').length,
+    discarded:rows.filter(x=>x.decision==='Descartada').length,
     duplicateFiles:documents.filter(x=>x.fields?.['Estado documental']==='Copia de otra factura').length,
     bankVerified:rows.filter(x=>x.payment==='Justificante contrastado').length
   },rows};
