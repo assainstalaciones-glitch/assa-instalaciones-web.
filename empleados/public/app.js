@@ -28,12 +28,12 @@ function renderReconciliation(){
   const data=state.reconciliation;
   if(!data)return layout('<section class="panel"><h2>Conciliación no disponible</h2><p>Entra de nuevo en Conciliación para consultar el índice de Airtable.</p></section>');
   const rows=data.rows||[],counts=data.counts||{},query=(state.reconciliationSearch||'').toLocaleLowerCase('es');
-  const filters=[{value:'review',label:'Para revisar'},{value:'matched',label:'Coincidencias documentales'},{value:'all',label:'Todos'}];
-  const shown=rows.filter(r=>(state.reconciliationFilter==='all'||(state.reconciliationFilter==='review'?r.reviewRequired:!r.reviewRequired))&&
+  const filters=[{value:'review',label:'Para revisar'},{value:'matched',label:'Coincidencias documentales'},{value:'resolved',label:'Revisadas'},{value:'all',label:'Todos'}];
+  const shown=rows.filter(r=>(state.reconciliationFilter==='all'||(state.reconciliationFilter==='review'?r.reviewRequired:state.reconciliationFilter==='resolved'?r.decision!=='Pendiente':r.result==='Coincidencia documental'&&r.decision==='Pendiente'))&&
     [r.client,r.fiscalClient,r.work,r.invoice,r.reviewType].join(' ').toLocaleLowerCase('es').includes(query));
   const money=n=>typeof n==='number'?n.toLocaleString('es-ES',{style:'currency',currency:'EUR'}):'Sin importe';
   layout(`<div class="topbar"><div class="titleblock"><span class="eyebrow">Solo administración ASSA</span>
-     <h1>Conciliación documental</h1><p>Facturas de Drive comparadas con clientes y trabajos de Airtable.</p></div><span class="chip">Piloto · Solo lectura</span></div>
+     <h1>Conciliación documental</h1><p>Facturas de Drive comparadas con clientes y trabajos de Airtable.</p></div><span class="chip">Piloto · Validación documental</span></div>
      <section class="dash-kpis recon-kpis">
        <div class="dash-kpi"><span>Facturas encontradas</span><strong>${Number(counts.proposals||0)}</strong></div>
        <div class="dash-kpi"><span>Archivos en el índice</span><strong>${Number(counts.documentFiles||0)}</strong></div>
@@ -42,7 +42,7 @@ function renderReconciliation(){
        <div class="dash-kpi"><span>Copias duplicadas</span><strong>${Number(counts.duplicateFiles||0)}</strong></div>
      </section>
      <div class="pale dash-disclaimer"><strong>La factura localizada no significa cobro verificado.</strong>
-       Esta sección muestra coincidencias propuestas y enlaces a documentos originales. Ninguna factura, ficha de cliente, envío ni importe cobrado se modifica aquí.
+       Las decisiones solo se guardan en la tabla de propuestas de Airtable. Ninguna factura, ficha de cliente, envío ni importe cobrado se modifica aquí.
        <strong>${Number(counts.bankVerified||0)} cobros</strong> tienen justificante independiente contrastado en este piloto.</div>
      <div class="section-head"><h2>Documentos y coincidencias</h2><button class="button small light" type="button" id="reconRefresh">↻ Actualizar</button></div>
      <div class="tabs dash-tabs">${filters.map(t=>`<button type="button" class="tab ${state.reconciliationFilter===t.value?'active':''}" data-recon-filter="${h(t.value)}">${h(t.label)}</button>`).join('')}</div>
@@ -53,17 +53,20 @@ function renderReconciliation(){
        <div class="dash-tags">
          <span class="dash-tag ${r.reviewRequired?'warn':'ok'}">${h(r.result)}</span>
          ${r.reviewType?`<span class="dash-tag neutral">${h(r.reviewType)}</span>`:''}
+         ${r.decision!=='Pendiente'?`<span class="dash-tag ${r.decision==='Descartada'?'warn':'ok'}">${h(r.decision)}</span>`:''}
        </div>
        <div class="dash-finance"><span>Cliente en factura: <strong>${h(r.fiscalClient||'No identificado')}</strong></span>
          <span>Envío: <strong>${h(r.delivery)}</strong></span>
          <span>Cobro: <strong>${h(r.payment)}</strong></span></div>
        <div class="pale recon-reason"><strong>Comprobación:</strong> ${h(r.why)}</div>
+       ${r.reviewedBy?`<p class="smalltext">Revisado por ${h(r.reviewedBy)}${r.reviewedAt?" · "+h(r.reviewedAt.slice(0,16)):""}</p>`:""}
        <div class="dash-card-actions">
          ${r.url?`<a class="button small light" href="${h(r.url)}" target="_blank" rel="noopener noreferrer">📄 Ver factura original</a>`:''}
          ${r.workId?`<button type="button" class="button small ghost" data-recon-work="${h(r.workId)}">Ver trabajo</button>`:''}
+         ${r.reviewRequired?`<button type="button" class="button small primary" data-recon-decision="Validada sin aplicar" data-id="${h(r.id)}">Validar coincidencia</button><button type="button" class="button small ghost" data-recon-decision="Descartada" data-id="${h(r.id)}">Descartar</button>`:''}
        </div>
      </article>`).join(''):'<div class="empty"><h3>Sin propuestas en este filtro</h3><p>Prueba otra categoría o cambia la búsqueda.</p></div>'}</div>
-     <p class="smalltext dash-disclaimer-bottom">Fuentes: Airtable y documentos existentes de Google Drive. Las revisiones están pendientes de validación por administración. No hay sincronización periódica ni cierre automático de cobros activo.</p>`);
+     <p class="smalltext dash-disclaimer-bottom">Fuentes: Airtable y documentos existentes de Google Drive. Las decisiones validadas no se aplican automáticamente al CRM. No hay sincronización periódica de Drive ni cierre automático de cobros activo.</p>`);
   el.querySelector('#reconRefresh').addEventListener('click',async ev=>{
     const btn=ev.currentTarget;busy(btn,true);
     try{await loadReconciliation();renderReconciliation();toast('Conciliación actualizada desde Airtable.');}
@@ -77,6 +80,21 @@ function renderReconciliation(){
     renderReconciliation();const input=el.querySelector('#reconSearch');input.focus();input.setSelectionRange(cursor,cursor);
   });
   el.querySelectorAll('[data-recon-work]').forEach(btn=>btn.addEventListener('click',()=>openJob(btn.dataset.reconWork)));
+  el.querySelectorAll('[data-recon-decision]').forEach(btn=>btn.addEventListener('click',async()=>{
+    const id=btn.dataset.id,decision=btn.dataset.reconDecision;
+    const row=(state.reconciliation?.rows||[]).find(x=>x.id===id);
+    if(!row||!row.reviewRequired)return toast('La propuesta ya se ha revisado.',true);
+    const message=decision==='Validada sin aplicar'
+      ?'¿Validar documentalmente la coincidencia de la factura '+row.invoice+'? Se guardará tu decisión, pero NO cambiará datos de clientes, facturas ni cobros.'
+      :'¿Descartar esta propuesta de la factura '+row.invoice+'? El documento original seguirá guardado y no se modificarán datos financieros.';
+    if(!confirm(message))return;
+    busy(btn,true);
+    try{
+      const result=await api('/admin/reconciliation/'+id+'/decision','PATCH',{decision});
+      await loadReconciliation();renderReconciliation();
+      toast(result.notice||'Decisión documental guardada.');
+    }catch(err){toast(err.message,true);busy(btn,false);}
+  }));
 }
 function renderDashboard(){
   if(state.me?.role!=='administrador')return navigate('jobs');
