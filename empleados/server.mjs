@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { reviewEvent, appendReview, validDate, scheduleSnapshot, executionSummary } from './workflow.mjs';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,7 +7,7 @@ import { createHmac, createHash, randomBytes, scryptSync, timingSafeEqual } from
 import { createSignedWorkPdf } from './signed-pdf.mjs';
 import { buildCommercialOT } from './ot-commercial.mjs';
 import { confirmedBudget, prepareOtFields } from './ot-sync.mjs';
-import { buildAdminDashboard, isTestRecord } from './admin-dashboard.mjs';
+import { buildAdminDashboard } from './admin-dashboard.mjs';
 import { buildReconciliationView } from './reconciliation-view.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -36,7 +37,7 @@ function safeUsername(s){return limit(s,30).toLowerCase().replace(/[^a-z0-9_-]/g
 function passwordHash(password, salt = randomBytes(16).toString('hex')) { return `scrypt$${salt}$${scryptSync(password,salt,64).toString('hex')}`; }
 function comparePassword(pass, hash){try{ const [alg,salt,hex]=hash.split('$'); if(alg!=='scrypt'||!salt||!/^[0-9a-f]{128}$/.test(hex))return false; const a=scryptSync(pass,salt,64),b=Buffer.from(hex,'hex'); return timingSafeEqual(a,b); }catch{return false;}}
 function sign(obj){const body=Buffer.from(JSON.stringify(obj)).toString('base64url'); const sig=createHmac('sha256',SECRET).update(body).digest('base64url');return `${body}.${sig}`;}
-function verify(token){try{const [body,sig]=token.split('.'); if(!body||!sig)return null; const expected=createHmac('sha256',SECRET).update(body).digest();const got=Buffer.from(sig,'base64url');if(got.length!==expected.length||!timingSafeEqual(got,expected))return null;const data=JSON.parse(Buffer.from(body,'base64url'));if(data.exp<Date.now()||!safeUsername(data.user))return null;return data;}catch{return null;}}
+function verify(token){try{const [body,sig]=token.split('.'); if(!body||!sig)return null; const expected=createHmac('sha256',SECRET).update(body).digest();const got=Buffer.from(sig,'base64url');if(got.length!==expected.length||!timingSafeEqual(got,expected))return null;const data=JSON.parse(Buffer.from(body,'base64url'));if(!Number.isFinite(data.exp)||data.exp<Date.now()||!['administrador','tecnico'].includes(data.role)||!safeUsername(data.user))return null;return data;}catch{return null;}}
 function cookie(res, value, clear=false){res.setHeader('Set-Cookie',`assa_session=${value}; HttpOnly; Secure; SameSite=Strict; Path=/; ${clear?'Max-Age=0':'Max-Age=43200'}`);}
 function json(res,status,obj){const data=JSON.stringify(obj);res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(data);}
 function failure(status,msg){return Object.assign(new Error(msg),{status});}
@@ -52,7 +53,7 @@ async function airtable(table, method='GET', path='', body=null, fields=null){
   }finally{clearTimeout(timer);}
 }
 async function getOne(table,id){if(!validId(id))throw failure(400,'Referencia inválida.');return airtable(table,'GET',`/${id}`);}
-async function list(table,fields,cap=500){let records=[],offset='';do{const qs=new URLSearchParams({pageSize:'100'});if(offset)qs.set('offset',offset);const data=await airtable(table,'GET',`?${qs}`,null,fields);records.push(...(data.records||[]));offset=data.offset||'';}while(offset && records.length<cap);return records.slice(0,cap);}
+async function list(table,fields,cap=500){let records=[],offset='';do{const qs=new URLSearchParams({pageSize:'100'});if(offset)qs.set('offset',offset);const data=await airtable(table,'GET',`?${qs}`,null,fields);records.push(...(data.records||[]));offset=data.offset||'';}while(offset && records.length<cap);if(offset)throw failure(503,'La consulta supera el límite seguro. No se ha aplicado ningún cambio.');return records;}
 async function create(table,fields){return airtable(table,'POST','',{fields,typecast:false});}
 async function patch(table,id,fields){return airtable(table,'PATCH',`/${id}`,{fields,typecast:false});}
 async function requestBody(req){let chunks=[],bytes=0;for await(const c of req){bytes+=c.length;if(bytes>7*1024*1024)throw failure(413,'El archivo o formulario es demasiado grande.');chunks.push(c);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch{throw failure(400,'Datos no válidos.');}}
@@ -60,7 +61,7 @@ function originCheck(req){const origin=req.headers.origin;if(origin && new URL(o
 async function identify(req){const raw=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('assa_session='))?.split('=')[1]||'';const claim=verify(raw);if(!claim)return null;
   if(claim.user===ROOTUSER && ROOTUSER && claim.role==='administrador')return {username:ROOTUSER,name:'Administración ASSA',role:'administrador'};
   const records=await list('users',Object.values(F.user));const user=records.find(x=>x.fields[F.user.username]===claim.user && x.fields[F.user.active]===true);
-  return user?{username:claim.user,name:user.fields[F.user.name]||claim.user,role:user.fields[F.user.role]||'tecnico'}:null;
+  return user&&['administrador','tecnico'].includes(user.fields[F.user.role])?{username:claim.user,name:user.fields[F.user.name]||claim.user,role:user.fields[F.user.role]||'tecnico'}:null;
 }
 function reqAuth(user){if(!user)throw failure(401,'Accede con tu usuario y contraseña.');}
 function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failure(403,'Solo administración puede realizar esta acción.');}
@@ -131,6 +132,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const input=await requestBody(req);const ip=`${req.socket.remoteAddress||'client'}:${safeUsername(input.username)}`;if(!loginThrottle(ip))throw failure(429,'Demasiados intentos. Prueba más tarde.');const uname=safeUsername(input.username);const pass=String(input.password||'');let account=null;
     if(uname===ROOTUSER&&comparePassword(pass,ROOTHASH))account={username:ROOTUSER,role:'administrador',name:'Administración ASSA'};
     if(!account){const users=await list('users',Object.values(F.user));const a=users.find(x=>x.fields[F.user.username]===uname&&x.fields[F.user.active]===true);if(a&&comparePassword(pass,a.fields[F.user.hash]||''))account={username:uname,role:a.fields[F.user.role],name:a.fields[F.user.name]||uname};}
+    if(account&&!['administrador','tecnico'].includes(account.role))account=null;
     if(!account)throw failure(401,'Usuario o contraseña incorrectos.');
     cookie(res,sign({user:uname,role:account.role,exp:Date.now()+12*3600000}));return json(res,200,{user:account});
   }
@@ -153,8 +155,54 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   if(toggle&&method==='PATCH'){reqAdmin(user);const b=await requestBody(req);await patch('users',toggle[1],{[F.user.active]:b.active===true});return json(res,200,{ok:true});}
   const jobMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})$/);
   if(jobMatch&&method==='GET'){const j=await authorizedJob(jobMatch[1],user);return json(res,200,{job:jobView(j,admin)});}
-  const assignMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/assign$/);
-  if(assignMatch&&method==='PATCH'){reqAdmin(user);await getOne('jobs',assignMatch[1]);const b=await requestBody(req);const names=Array.isArray(b.users)?b.users.map(safeUsername):[];const employees=await list('users',Object.values(F.user));const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true).map(x=>x.fields[F.user.username]));if(names.some(x=>!allowed.has(x)))throw failure(400,'Algún usuario no está activo.');await patch('jobs',assignMatch[1],{[F.job.assigned]:[...new Set(names)].join(', ')});return json(res,200,{ok:true});}
+  const scheduleMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/schedule$/);
+  if(scheduleMatch&&method==='PATCH'){
+    reqAdmin(user);
+    const job=await getOne('jobs',scheduleMatch[1]),b=await requestBody(req);
+    if(!ACTIVE.has(job.fields[F.job.state]))throw failure(409,'Solo se pueden planificar trabajos abiertos.');
+    const prior=scheduleSnapshot(job.fields);
+    if(!b.expected||b.expected.date!==prior.date||b.expected.assigned!==prior.assigned)
+      throw failure(409,'La planificación ha cambiado. Actualiza y revisa antes de guardar.');
+    if(typeof b.date!=='string'||(b.date&&!validDate(b.date))||!Array.isArray(b.users)||b.users.some(x=>typeof x!=='string'||safeUsername(x)!==x))
+      throw failure(400,'Indica una fecha válida y usuarios del equipo.');
+    const employees=await list('users',Object.values(F.user));
+    const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true&&x.fields[F.user.role]==='tecnico').map(x=>x.fields[F.user.username]));
+    if(b.users.some(x=>!allowed.has(x)))throw failure(400,'Solo se pueden asignar técnicos activos.');
+    const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);
+    if(orders.some(o=>(o.fields[F.order.job]||[]).includes(job.id)&&(reviewEvent(o)?.state==='pending'||o.fields[F.order.pdf]?.length)))throw failure(409,'Hay un cierre pendiente o un parte firmado protegido.');
+    const changes={[F.job.date]:b.date||null,[F.job.assigned]:[...new Set(b.users)].join(', ')};
+    await patch('jobs',job.id,changes);
+    const saved=await getOne('jobs',job.id);
+    if(saved.fields[F.job.date]!==b.date&&!( !saved.fields[F.job.date]&&!b.date)|| (saved.fields[F.job.assigned]||'')!==changes[F.job.assigned])throw failure(409,'Revisa la planificación: no coincide con el cambio solicitado.');
+    return json(res,200,{job:jobView(saved,true)});
+  }
+  if(p==='/api/admin/closures'&&method==='GET'){
+    reqAdmin(user);
+    const [orders,jobs]=await Promise.all([list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf,F.order.number],3000),list('jobs',Object.values(F.job),3000)]);
+    const pending=orders.filter(o=>reviewEvent(o)?.state==='pending').map(o=>({id:o.id,number:o.fields[F.order.number]||'',signed:o.fields[F.order.state]==='Firmado / archivado'&&!!o.fields[F.order.pdf]?.length,event:reviewEvent(o),job:jobs.find(j=>j.id===o.fields[F.order.job]?.[0])}));
+    return json(res,200,{canApprove:user.username===ROOTUSER,closures:pending.map(o=>({...o,job:o.job?jobView(o.job,true):null}))});
+  }
+  const approveMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/approve-closure$/);
+  if(approveMatch&&method==='POST'){
+    reqAdmin(user);if(user.username!==ROOTUSER)throw failure(403,'El cierre final requiere la cuenta de Samuel.');
+    const b=await requestBody(req),job=await getOne('jobs',approveMatch[1]);
+    const order=await getOne('orders',b.orderId),event=reviewEvent(order);
+    if(!(order.fields[F.order.job]||[]).includes(job.id)||!event)throw failure(409,'No es un cierre de este flujo. El histórico se conserva.');
+    if(event.state==='approved')return json(res,200,{ok:true,unchanged:true});
+    if(event.state!=='pending'||order.fields[F.order.state]!=='Firmado / archivado'||!order.fields[F.order.pdf]?.length)throw failure(409,'Falta un parte firmado y archivado.');
+    if(!ACTIVE.has(job.fields[F.job.state])&&job.fields[F.job.state]!=='Terminado')throw failure(409,'El trabajo ha cambiado de estado. Revisión manual necesaria.');
+    const reports=await list('reports',Object.values(F.report),3000);
+    const related=reports.filter(r=>(r.fields[F.report.job]||[]).includes(job.id));
+    if(!related.length)throw failure(409,'No hay partes de ejecución para revisar.');
+    // Recover a failed report-freeze after the immutable PDF was archived.
+    for(const r of related)if(!r.fields[F.report.done])await patch('reports',r.id,{[F.report.done]:true,[F.report.closed]:event.submittedAt});
+    if(job.fields[F.job.state]!=='Terminado')await patch('jobs',job.id,{[F.job.state]:'Terminado'});
+    await patch('orders',order.id,{[F.order.internal]:appendReview(order.fields[F.order.internal],{...event,state:'approved',reviewer:user.username,reviewedAt:new Date().toISOString()})});
+    const saved=await getOne('orders',order.id),savedJob=await getOne('jobs',job.id);
+    if(reviewEvent(saved)?.state!=='approved'||savedJob.fields[F.job.state]!=='Terminado')throw failure(409,'No se ha podido verificar el cierre. Actualiza y revisa.');
+    return json(res,200,{ok:true});
+  }
+
 
 
   const prepareMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/prepare-ot$/);
@@ -211,8 +259,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const related=orders.filter(x=>(x.fields[F.order.job]||[]).includes(job.id));
     let order=related.find(x=>x.fields[F.order.state]==='Pendiente de completar')||
       related.find(x=>x.fields[F.order.state]==='Firmado / archivado')||related[0];
-    const signed=related.some(x=>x.fields[F.order.state]==='Firmado / archivado'&&
-      (x.fields[F.order.pdf]||[]).length);
+    const signed=related.some(x=>(x.fields[F.order.pdf]||[]).length);
     if(method==='PATCH'){
       reqAdmin(user);
       const b=await requestBody(req);
@@ -232,14 +279,8 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
         if(['client','address','phone','email'].includes(key))jobChanges[F.job[key==='client'?'name':key]]=value;
       }
       if(!Object.keys(fields).length)throw failure(400,'No hay datos para guardar.');
-      // La ficha administrativa se puede completar después, sin sustituir el PDF original firmado.
+      if(signed||!ACTIVE.has(job.fields[F.job.state]))throw failure(409,'El histórico y los partes firmados están protegidos.');
       if(order){
-        if(signed){
-          const prior=order.fields[F.order.internal]||'';
-          const audit='DATOS ADMINISTRATIVOS ACTUALIZADOS '+new Date().toISOString()+' por '+user.username+
-            ' (OT firmada conservada; campos: '+Object.keys(b).filter(x=>allowed[x]).join(', ')+')';
-          fields[F.order.internal]=(prior+'\n'+audit).trim().slice(-8500);
-        }
         await patch('orders',order.id,fields);
       }else{
         const newFields={
@@ -268,8 +309,10 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       email:'Correo electrónico',city:'Población',postal:'Código postal',taxId:'NIF / DNI'
     }))if(!info[k])missing.push(label);
     if(!info.commercial.priceVerified)missing.push('Importe del presupuesto aceptado y su IVA');
-    return json(res,200,{info,number:order?.fields[F.order.number]||'Sin OT numerada',
-      missing,signed,editable:admin});
+    const reports=await list('reports',Object.values(F.report),3000);
+    const summary=executionSummary(reports.filter(r=>(r.fields[F.report.job]||[]).includes(job.id)));
+    return json(res,200,{info,summary,number:order?.fields[F.order.number]||'Sin OT numerada',
+      missing,signed,editable:admin&&!signed&&ACTIVE.has(job.fields[F.job.state])});
   }
 
 
@@ -323,19 +366,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   }
   const adminConfirmMatch=p.match(/^\/api\/admin\/jobs\/(rec[A-Za-z0-9]{14})\/confirm$/);
   if(adminConfirmMatch&&method==='PATCH'){
-    reqAdmin(user);
-    const b=await requestBody(req);
-    if(!['invoiceSent','paymentConfirmed'].includes(b.field)||typeof b.checked!=='boolean')
-      throw failure(400,'Indica la comprobación y el valor verdadero o falso.');
-    const job=await getOne('jobs',adminConfirmMatch[1]);
-    if(!job.fields[F.job.state]||isTestRecord(job.fields))
-      throw failure(400,'Solo se permiten confirmaciones sobre trabajos operativos reales.');
-    const field=b.field==='invoiceSent'?F.job.invoiceSent:F.job.paymentConfirmed;
-    const dateField=b.field==='invoiceSent'?F.job.invoiceSentAt:F.job.paymentConfirmedAt;
-    if(!!job.fields[field]===b.checked)return json(res,200,{ok:true,unchanged:true});
-    await patch('jobs',job.id,{[field]:b.checked,[dateField]:b.checked?new Date().toISOString():null});
-    return json(res,200,{ok:true,field:b.field,checked:b.checked,
-      notice:'Comprobación administrativa guardada. No se han modificado facturas, importes ni estado de cobro.'});
+    reqAdmin(user);throw failure(403,'Las confirmaciones de facturas y cobros están protegidas en esta entrega.');
   }
 
   const otPreviewMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/ot$/);
@@ -403,21 +434,17 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const related=allOrders.filter(r=>(r.fields[F.order.job]||[]).includes(job.id));
     const already=related.find(r=>r.fields[F.order.state]==='Firmado / archivado'&&(r.fields[F.order.pdf]||[]).length);
     if(already){
+      if(!reviewEvent(already))return json(res,200,{ok:true,alreadySigned:true,part:{id:already.id,number:already.fields[F.order.number]||'',file:already.fields[F.order.pdf][0]}});
       // Si falló un paso posterior a guardar el PDF, recuperar el cierre sin duplicar partes.
-      const current=candidates.find(r=>r.fields[F.report.user]===user.username)||
-        (admin?candidates.find(r=>!r.fields[F.report.done]):null);
-      if(current&&!current.fields[F.report.done]){
-        await patch('reports',current.id,{[F.report.done]:true,[F.report.closed]:new Date().toISOString()});
-      }
-      await patch('jobs',job.id,{[F.job.state]:'Terminado'});
+      for(const r of candidates)if(!r.fields[F.report.done])await patch('reports',r.id,{[F.report.done]:true,[F.report.closed]:new Date().toISOString()});
+      // PDF already archived: recover the report without closing the job.
       return json(res,200,{ok:true,alreadySigned:true,
         part:{id:already.id,number:already.fields[F.order.number]||'',file:(already.fields[F.order.pdf]||[])[0]||null}});
     }
     const now=new Date(),signedAt=now.toISOString();
     const reference='PORTAL-FIRMA:'+job.id;
     const receiptHash=createHash('sha256').update(JSON.stringify({job:job.id,report:selected.id,signer,address,customerNotes,signedAt})).update(signature).digest('hex').slice(0,24);
-    const report={user:selected.fields[F.report.user],date:selected.fields[F.report.date],
-      hours:selected.fields[F.report.hours],material:selected.fields[F.report.material],notes:selected.fields[F.report.notes]};
+    const report={...executionSummary(candidates),date:selected.fields[F.report.date]};
     let order=related.find(r=>r.fields[F.order.state]==='Pendiente de completar'&&String(r.fields[F.order.internal]||'').includes(reference))||
       related.find(r=>r.fields[F.order.state]==='Pendiente de completar'&&!(r.fields[F.order.pdf]||[]).length);
     if(!order){
@@ -436,7 +463,10 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       if(job.fields[F.job.phone])fields[F.order.phone]=limit(job.fields[F.job.phone],50);
       order=await create('orders',fields);
     }
-    const current=await getOne('orders',order.id);
+    let current=await getOne('orders',order.id);
+    if(!reviewEvent(current)){
+      current=await patch('orders',order.id,{[F.order.internal]:appendReview(current.fields[F.order.internal],{state:'pending',submittedBy:user.username,submittedAt:signedAt})});
+    }
     if(!(current.fields[F.order.pdf]||[]).length){
       const pdf=await createSignedWorkPdf({
         number:current.fields[F.order.number]||order.id,
@@ -452,8 +482,8 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       if(!upload.ok){console.error('Airtable signed PDF upload',upload.status);throw failure(502,'El PDF no se pudo guardar en Airtable. Prueba de nuevo.');}
     }
     await patch('orders',order.id,{[F.order.state]:'Firmado / archivado'});
-    await patch('reports',selected.id,{[F.report.done]:true,[F.report.closed]:signedAt});
-    await patch('jobs',job.id,{[F.job.state]:'Terminado'});
+    for(const r of candidates)if(!r.fields[F.report.done])await patch('reports',r.id,{[F.report.done]:true,[F.report.closed]:signedAt});
+    // The job remains open until Samuel approves it from the private panel.
     const archived=await getOne('orders',order.id);
     return json(res,200,{ok:true,part:{id:order.id,number:archived.fields[F.order.number]||'',
       file:(archived.fields[F.order.pdf]||[])[0]||null}});
@@ -462,7 +492,11 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   const reportsMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/reports$/);
   if(reportsMatch){await authorizedJob(reportsMatch[1],user);const all=await list('reports',Object.values(F.report),1000);const related=all.filter(r=>(r.fields[F.report.job]||[]).includes(reportsMatch[1])&&(admin||r.fields[F.report.user]===user.username));
     if(method==='GET')return json(res,200,{reports:related.map(reportView)});
-    if(method==='POST'){const b=await requestBody(req);const hours=b.hours===''||b.hours===null?null:Number(b.hours);if(hours!==null&&(!Number.isFinite(hours)||hours<0||hours>24))throw failure(400,'Horas inválidas.');const ref=`${reportsMatch[1]}-${user.username}`;const fields={[F.report.ref]:ref,[F.report.job]:[reportsMatch[1]],[F.report.user]:user.username,[F.report.material]:limit(b.material,10000),[F.report.notes]:limit(b.notes,10000),[F.report.date]:/^\d{4}-\d{2}-\d{2}$/.test(b.date||'')?b.date:dateMadrid()};if(hours!==null)fields[F.report.hours]=hours;
+    if(method==='POST'){
+      const job=await getOne('jobs',reportsMatch[1]);if(!ACTIVE.has(job.fields[F.job.state]))throw failure(409,'El trabajo no está abierto.');
+      const orders=await list('orders',[F.order.job,F.order.pdf],3000);
+      if(orders.some(o=>(o.fields[F.order.job]||[]).includes(job.id)&&o.fields[F.order.pdf]?.length))throw failure(409,'El trabajo tiene un parte firmado; la ejecución está bloqueada.');
+      const b=await requestBody(req);const hours=b.hours===''||b.hours===null?null:Number(b.hours);if(hours!==null&&(!Number.isFinite(hours)||hours<0||hours>24))throw failure(400,'Horas inválidas.');const ref=`${reportsMatch[1]}-${user.username}`;const fields={[F.report.ref]:ref,[F.report.job]:[reportsMatch[1]],[F.report.user]:user.username,[F.report.material]:limit(b.material,10000),[F.report.notes]:limit(b.notes,10000),[F.report.date]:/^\d{4}-\d{2}-\d{2}$/.test(b.date||'')?b.date:dateMadrid()};if(hours!==null)fields[F.report.hours]=hours;
       const prev=related.find(r=>r.fields[F.report.user]===user.username);if(prev?.fields[F.report.done])throw failure(409,'El parte ya está cerrado.');const result=prev?await patch('reports',prev.id,fields):await create('reports',fields);return json(res,200,{report:reportView(result)});}
   }
   const finishMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/finish$/);
@@ -483,7 +517,12 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   throw failure(404,'Ruta no encontrada.');
 }
 async function staticFile(req,res,p){if(req.method!=='GET')throw failure(405,'Método no permitido.');let target=p==='/'?'index.html':p.slice(1);if(target.includes('..')||target.includes('\\')||target.startsWith('.'))throw failure(404,'No existe.');target=normalize(target);const absolute=join(ROOT,'public',target);const check=await stat(absolute).catch(()=>null);if(!check?.isFile())throw failure(404,'No existe.');const data=await readFile(absolute);res.writeHead(200,{'Content-Type':MIME[extname(absolute)]||'application/octet-stream','Cache-Control':target==='index.html'?'no-store':'public, max-age=900','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'strict-origin-when-cross-origin','Content-Security-Policy':"default-src 'self'; img-src 'self' data: https://*.airtableusercontent.com; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"});res.end(data);}
-const server=http.createServer(async(req,res)=>{try{const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}});
+const writingJobs=new Set();
+const server=http.createServer(async(req,res)=>{let writeKey;try{
+  if(!['GET','HEAD'].includes(req.method)){
+    writeKey=/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\//.exec(req.url||'')?.[1];
+    if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
+  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'direction-agenda-review-v1'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({
