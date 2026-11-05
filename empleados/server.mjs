@@ -286,6 +286,29 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     return json(res,200,buildReconciliationView({proposals,documents,jobs,clients}));
   }
 
+  const reconciliationDecisionMatch=p.match(/^\/api\/admin\/reconciliation\/(rec[A-Za-z0-9]{14})\/decision$/);
+  if(reconciliationDecisionMatch&&method==='PATCH'){
+    reqAdmin(user);
+    const body=await requestBody(req);
+    if(!['Validada sin aplicar','Descartada'].includes(body.decision))
+      throw failure(400,'Decisión de conciliación no válida.');
+    const proposal=await getOne('reconciliation',reconciliationDecisionMatch[1]);
+    const previous=proposal.fields['Decisión administración']||'Pendiente';
+    if(previous===body.decision)return json(res,200,{ok:true,unchanged:true,decision:previous});
+    if(previous!=='Pendiente')
+      throw failure(409,'Esta propuesta ya tiene una decisión. Para rectificarla, revisa el registro de auditoría en Airtable.');
+    const evidenceLink=(proposal.fields['Documento verificado']||[])[0];
+    if(!evidenceLink)throw failure(409,'No hay documento indexado; no puede aprobarse sin evidencia.');
+    await getOne('reconciliationDocs',evidenceLink);
+    await patch('reconciliation',proposal.id,{
+      'Decisión administración':body.decision,
+      'Revisado por':user.username,
+      'Fecha de decisión':new Date().toISOString()
+    });
+    return json(res,200,{ok:true,decision:body.decision,
+      notice:'Revisión documental guardada en Airtable. Ninguna factura, cliente ni cobro se ha modificado.'});
+  }
+
   if(p==='/api/admin/dashboard'&&method==='GET'){
     reqAdmin(user);
     const dashFields=[F.job.ref,F.job.name,F.job.address,F.job.state,F.job.total,F.job.client,F.job.desc,
