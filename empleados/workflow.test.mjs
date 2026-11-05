@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { reviewEvent, appendReview, validDate } from './workflow.mjs';
+import {OUTCOMES,outcomeVersion} from './public/outcomes.js';
 
 test('Fechas reales y auditoría sin migrar notas históricas',()=>{
   assert.equal(validDate('2026-02-30'),false);assert.equal(validDate('2026-11-05'),true);
@@ -129,6 +130,48 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal(JSON.stringify(report),original);assert.equal(JSON.stringify(tables.tblvZgkNh2cX1bTNx[0]),pdf);
     assert.equal(tables.tblsVLKBSafEEiUlI[0].fields.Estado,'Terminado');
     const history=(await call('/jobs/'+jid+'/direction-edit','samuel')).data.history;assert.equal(history.at(-1).reportMode,'annotation');assert.equal(history.at(-1).reportAfter['Horas reales'],1.5);
+  });
+  const outcomeId='rec00000000000009';
+  tables.tblsVLKBSafEEiUlI.push({id:outcomeId,fields:{'Nombre del Cliente':'Visita de ejemplo','Estado':'En progreso','Operarios asignados portal':'saul','Importe cobrado':20,'Cobro confirmado (portal)':true}});
+  const outcomeBody=async(code,n=5)=>({code,reason:'Motivo y seguimiento de ejemplo',operationId:String(n).repeat(8)+'-'+String(n).repeat(4)+'-4'+String(n).repeat(3)+'-8'+String(n).repeat(3)+'-'+String(n).repeat(12),expected:outcomeVersion((await call('/jobs/'+outcomeId,'samuel')).data.job)});
+  await t.test('Técnico comunica desistimiento; Samuel confirma cierre sin modificar cobro ni exigir firma de trabajo no realizado',async()=>{
+    const b=await outcomeBody('declined');const status=tables.tblsVLKBSafEEiUlI.at(-1).fields.Estado;
+    const proposal=await call('/jobs/'+outcomeId+'/outcomes','saul','POST',b);assert.equal(proposal.status,200,JSON.stringify(proposal.data));assert.equal(proposal.data.pending,true);assert.equal(tables.tblsVLKBSafEEiUlI.at(-1).fields.Estado,status);
+    const requests=(await call('/admin/outcomes','samuel')).data.requests;const request=requests.find(r=>r.job.id===outcomeId);assert.ok(request);
+    assert.equal((await call('/jobs/'+outcomeId+'/outcomes/'+request.id+'/decision','saul','POST',{decision:'approve'})).status,403);
+    const decision=await call('/jobs/'+outcomeId+'/outcomes/'+request.id+'/decision','samuel','POST',{decision:'approve'});assert.equal(decision.status,200,JSON.stringify(decision.data));
+    const fields=tables.tblsVLKBSafEEiUlI.at(-1).fields;assert.equal(fields.Estado,'No aceptado / Sin respuesta');assert.equal(fields['Resultado intervención (portal)'],OUTCOMES.find(o=>o.code==='declined').label);assert.equal(fields['Importe cobrado'],20);assert.equal(fields['Cobro confirmado (portal)'],true);
+    const count=writes.length;assert.equal((await call('/jobs/'+outcomeId+'/outcomes/'+request.id+'/decision','samuel','POST',{decision:'approve'})).status,200);assert.equal(writes.length,count);
+  });
+  await t.test('Visita diagnosticada pendiente de presupuesto permanece abierta comercialmente y conserva los partes',async()=>{
+    const reportBefore=JSON.stringify(tables.tblprtqasdBxVVsNx);const b=await outcomeBody('quote',6);
+    assert.equal((await call('/jobs/'+outcomeId+'/outcomes','samuel','POST',b)).status,200);
+    assert.equal(tables.tblsVLKBSafEEiUlI.at(-1).fields.Estado,'Presupuesto pendiente');assert.equal(JSON.stringify(tables.tblprtqasdBxVVsNx),reportBefore);
+  });
+  await t.test('Material y nueva visita dejan el caso pendiente de la siguiente acción, sin cerrar ni cobrar',async()=>{
+    const fields=tables.tblsVLKBSafEEiUlI.at(-1).fields;
+    assert.equal((await call('/jobs/'+outcomeId+'/outcomes','samuel','POST',await outcomeBody('materials',1))).status,200);assert.equal(fields.Estado,'Aceptado / Programado');
+    assert.equal((await call('/jobs/'+outcomeId+'/outcomes','samuel','POST',await outcomeBody('revisit',2))).status,200);assert.equal(fields.Estado,'Pendiente de visita');assert.equal(fields['Importe cobrado'],20);
+  });
+  await t.test('No realizado y cancelado son cierres operativos independientes; facturación existente se conserva',async()=>{
+    const fields=tables.tblsVLKBSafEEiUlI.at(-1).fields;
+    assert.equal((await call('/jobs/'+outcomeId+'/outcomes','samuel','POST',await outcomeBody('not_possible',7))).status,200);assert.equal(fields.Estado,'Cancelado');
+    fields.Estado='Facturado';fields['Ref. factura']='FACTURA-SIMULADA';
+    assert.equal((await call('/jobs/'+outcomeId+'/outcomes','samuel','POST',await outcomeBody('cancelled',8))).status,200);
+    assert.equal(fields.Estado,'Facturado');assert.equal(fields['Ref. factura'],'FACTURA-SIMULADA');assert.equal(fields['Importe cobrado'],20);
+  });
+  await t.test('Terminado exige PDF firmado; se puede descartar la solicitud sin modificar el estado',async()=>{
+    const b=await outcomeBody('completed',9),fields=tables.tblsVLKBSafEEiUlI.at(-1).fields,previous=fields.Estado;
+    assert.equal((await call('/jobs/'+outcomeId+'/outcomes','samuel','POST',b)).status,409);assert.equal(fields.Estado,previous);
+    assert.equal((await call('/admin/outcomes','samuel')).data.requests.some(r=>r.job.id===outcomeId),false);
+    fields.Estado='En progreso';const proposal=await outcomeBody('quote',3);assert.equal((await call('/jobs/'+outcomeId+'/outcomes','saul','POST',proposal)).status,200);
+    const request=(await call('/admin/outcomes','samuel')).data.requests.find(r=>r.job.id===outcomeId);assert.ok(request);
+    assert.equal((await call('/jobs/'+outcomeId+'/outcomes/'+request.id+'/decision','samuel','POST',{decision:'reject',reason:'Todavía no se ha realizado el trabajo'})).status,200);assert.equal(fields.Estado,'En progreso');
+  });
+  await t.test('Trabajo terminado con firma conserva su PDF y no confirma el cobro',async()=>{
+    const job=(await call('/jobs/'+jid,'samuel')).data.job,document=JSON.stringify(tables.tblvZgkNh2cX1bTNx[0]);
+    const r=await call('/jobs/'+jid+'/outcomes','samuel','POST',{code:'completed',reason:'Trabajo revisado y ejecución terminada',operationId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',expected:outcomeVersion(job)});
+    assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(JSON.stringify(tables.tblvZgkNh2cX1bTNx[0]),document);assert.equal(tables.tblsVLKBSafEEiUlI[0].fields.Estado,'Terminado');assert.equal(tables.tblsVLKBSafEEiUlI[0].fields['Importe cobrado'],500);
   });
   await t.test('Desactivar técnico revoca acceso; rol desconocido no autentica',async()=>{
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=false;assert.equal((await call('/me')).status,401);

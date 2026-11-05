@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import * as calendar from './public/calendar.js';
+import * as outcomes from './public/outcomes.js';
 test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>{
   const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',addEventListener(){},querySelector:x=>node(x),querySelectorAll:()=>[],getContext:()=>({fillRect(){}})});return nodes.get(id);};
-  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,...calendar});
+  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,...calendar,...outcomes});
   const code=readFileSync(new URL('./public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/init\(\);\s*$/,'');
   vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={state,renderAgenda,renderDashboard,renderWork,renderSign,renderDirectionEdit};",context);
   const ui=context.ui,app=node('#app');
@@ -17,6 +18,7 @@ test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>
   ui.renderDashboard();assert.match(app.innerHTML,/Cierres pendientes de Samuel/);assert.match(app.innerHTML,/data-approve-job=/);
   ui.state.job=job;ui.renderWork();assert.match(app.innerHTML,/scheduleDate/);assert.match(app.innerHTML,/Parte de ejecución/);assert.match(app.innerHTML,/Fotografías del trabajo/);
   assert.match(app.innerHTML,/Editar trabajo y parte/);
+  assert.match(app.innerHTML,/Resultado de la visita o trabajo/);assert.match(app.innerHTML,/El cliente desiste/);assert.match(app.innerHTML,/No se puede realizar/);
   ui.state.directionEdit={job:{...job,status:'Presupuesto pendiente'},reports:[{id:'rec00000000000004',user:'saul',hours:1,notes:'Diagnóstico',date:'2026-11-05',material:'Material original'}],history:[],version:'test'};
   ui.renderDirectionEdit();assert.match(app.innerHTML,/Presupuesto pendiente/);assert.match(app.innerHTML,/Material original/);assert.match(app.innerHTML,/Motivo de la corrección/);assert.doesNotMatch(app.innerHTML,/editReportHours[^>]*disabled/);
   ui.state.me={username:'saul',role:'tecnico'};ui.renderAgenda();assert.doesNotMatch(app.innerHTML,/data-nav="dashboard"/);assert.doesNotMatch(app.innerHTML,/agendaTech/);

@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { OUTCOME_FIELD, OUTCOMES, outcomeOption, outcomeVersion } from './public/outcomes.js';
 import { AUDIT_FIELD, JOB_EDIT_FIELDS, REPORT_EDIT_FIELDS, editVersion, readAudit, writeAudit, beforeValues, compatibleValues } from './direction-edit.mjs';
 import { validTime, overlap, assignedUsers } from './public/calendar.js';
 import { reviewEvent, appendReview, validDate, scheduleSnapshot, executionSummary } from './workflow.mjs';
@@ -23,7 +24,7 @@ const ROOTHASH = process.env.BOOTSTRAP_PASSWORD_HASH || '';
 const ready = TOKEN.startsWith('pat') && SECRET.length >= 32 && ROOTUSER && ROOTHASH.startsWith('scrypt$');
 const ACTIVE = new Set(['Aceptado / Programado', 'En progreso', 'Pendiente de visita']);
 const F = {
-  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado', audit:AUDIT_FIELD },
+  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado', audit:AUDIT_FIELD, outcome:OUTCOME_FIELD },
   client:{name:'Nombre',phone:'Teléfono',email:'Email',address:'Dirección'},
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
@@ -71,7 +72,7 @@ function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failu
 function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
 async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
 function signedPendingClosure(order,jobId){return (order.fields[F.order.job]||[]).includes(jobId)&&order.fields[F.order.state]==='Firmado / archivado'&&!!order.fields[F.order.pdf]?.length&&reviewEvent(order)?.state==='pending';}
-function jobView(record,admin){const f=record.fields;const data={id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
+function jobView(record,admin){const f=record.fields;const data={id:record.id,reference:f[F.job.ref]||'',client:f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
 async function otJobData(job,order){
   const j=job.fields||{},o=order?.fields||{};
   let cl={};
@@ -139,6 +140,43 @@ async function checkSlot({date,start,end,users,exclude}){
   if(conflicts.length)throw failure(409,'Solape de horario: '+conflicts.map(j=>(j.fields[F.job.name]||'Trabajo')+' '+j.fields[F.job.start]+'–'+j.fields[F.job.end]).join('; '));
   return same.some(j=>!validTime(j.fields[F.job.start])||!validTime(j.fields[F.job.end]))?['Hay otros trabajos de ese técnico sin horario. Confirma su duración antes de comprometer la franja.']:[];
 }
+function outcomeProof(e){return createHmac('sha256',SECRET).update(JSON.stringify({id:e.id,kind:e.kind,code:e.code,reason:e.reason,by:e.by,at:e.at,before:e.before})).digest('hex');}
+function pendingOutcomes(job){return readAudit(job).filter(e=>e.kind==='outcome'&&['requested','applying'].includes(e.state));}
+async function approveSignedClosure(job,order,user){const event=reviewEvent(order);
+    if(!(order.fields[F.order.job]||[]).includes(job.id)||!event)throw failure(409,'No es un cierre de este flujo. El histórico se conserva.');
+    if(event.state==='approved')return {ok:true,unchanged:true};
+    if(event.state!=='pending'||order.fields[F.order.state]!=='Firmado / archivado'||!order.fields[F.order.pdf]?.length)throw failure(409,'Falta un parte firmado y archivado.');
+    if(!ACTIVE.has(job.fields[F.job.state])&&!['Terminado','Facturado','Pendiente de cobro'].includes(job.fields[F.job.state]))throw failure(409,'El trabajo ha cambiado de estado. Revisión manual necesaria.');
+    const reports=await list('reports',Object.values(F.report),3000);
+    const related=reports.filter(r=>(r.fields[F.report.job]||[]).includes(job.id));
+    if(!related.length)throw failure(409,'No hay partes de ejecución para revisar.');
+    // Recover a failed report-freeze after the immutable PDF was archived.
+    for(const r of related)if(!r.fields[F.report.done])await patch('reports',r.id,{[F.report.done]:true,[F.report.closed]:event.submittedAt});
+    const finalStatus=['Facturado','Pendiente de cobro'].includes(job.fields[F.job.state])?job.fields[F.job.state]:'Terminado';
+    await patch('jobs',job.id,{[F.job.state]:finalStatus,[F.job.outcome]:outcomeOption('completed').label});
+    await patch('orders',order.id,{[F.order.internal]:appendReview(order.fields[F.order.internal],{...event,state:'approved',reviewer:user.username,reviewedAt:new Date().toISOString()})});
+    const saved=await getOne('orders',order.id),savedJob=await getOne('jobs',job.id);
+    if(reviewEvent(saved)?.state!=='approved'||savedJob.fields[F.job.state]!==finalStatus)throw failure(409,'No se ha podido verificar el cierre. Actualiza y revisa.');
+    return {ok:true};
+}
+async function applyOutcome(job,event,user){
+  const option=outcomeOption(event.code);if(!option||event.proof!==outcomeProof(event))throw failure(409,'No se ha podido verificar el resultado.');
+  const current=jobView(job,true),target=['Facturado','Pendiente de cobro'].includes(current.status)?current.status:option.status;
+  const expectedBefore=event.before,expectedAfter=outcomeVersion({...current,status:target,outcome:option.label});
+  if(outcomeVersion(current)!==expectedBefore&&outcomeVersion(current)!==expectedAfter)throw failure(409,'El estado ha cambiado desde que se comunicó la visita. Revisa el caso antes de cerrar.');
+  const orders=(await list('orders',Object.values(F.order),3000)).filter(o=>(o.fields[F.order.job]||[]).includes(job.id));
+  const signed=orders.find(o=>o.fields[F.order.pdf]?.length&&o.fields[F.order.state]==='Firmado / archivado');
+  if(option.signature&&!signed)throw failure(409,'Para marcar trabajo terminado, guarda primero la firma del cliente y su parte.');
+  if(!option.signature&&orders.some(o=>o.fields[F.order.pdf]?.length))throw failure(409,'Hay un parte firmado. Revisa su cierre o añade una rectificación desde dirección.');
+  let audit=readAudit(job),entry=audit.find(e=>e.id===event.id);entry.state='applying';await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});
+  if(option.signature)await approveSignedClosure(job,signed,user);
+  await patch('jobs',job.id,{[F.job.state]:target,[F.job.outcome]:option.label});
+  const saved=await getOne('jobs',job.id);
+  if(saved.fields[F.job.state]!==target||saved.fields[F.job.outcome]!==option.label)throw failure(409,'No se pudo verificar el resultado. Actualiza antes de reintentar.');
+  audit=readAudit(saved);entry=audit.find(e=>e.id===event.id);entry.state='approved';entry.reviewedBy=user.username;entry.reviewedAt=new Date().toISOString();await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});
+  const verified=await getOne('jobs',job.id);if(!readAudit(verified).some(e=>e.id===event.id&&e.state==='approved'))throw failure(409,'No se pudo verificar el historial del resultado.');
+  return {ok:true,notice:option.closed?'Caso cerrado operativamente. El cobro no se ha modificado.':'Resultado guardado; el caso sigue pendiente de la siguiente acción. El cobro no se ha modificado.'};
+}
 async function api(req,res,url){const method=req.method;const p=url.pathname; if(!ready)throw failure(503,'El portal está preparado, pendiente de configurar credenciales seguras y conexión a Airtable.');
   if(method!=='GET')originCheck(req);
   if(p==='/api/login'&&method==='POST'){
@@ -169,6 +207,37 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   if(toggle&&method==='PATCH'){reqAdmin(user);const b=await requestBody(req);await patch('users',toggle[1],{[F.user.active]:b.active===true});return json(res,200,{ok:true});}
   const jobMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})$/);
   if(jobMatch&&method==='GET'){const j=await authorizedJob(jobMatch[1],user);return json(res,200,{job:jobView(j,admin)});}
+  if(p==='/api/admin/outcomes'&&method==='GET'){
+    reqAdmin(user);const jobs=await list('jobs',Object.values(F.job),3000);
+    return json(res,200,{canDecide:user.username===ROOTUSER,requests:jobs.flatMap(j=>pendingOutcomes(j).map(e=>({id:e.id,code:e.code,label:outcomeOption(e.code)?.label||e.code,reason:e.reason,by:e.by,at:e.at,state:e.state,job:jobView(j,true)})))});
+  }
+  const outcomeMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/outcomes$/);
+  if(outcomeMatch&&['GET','POST'].includes(method)){
+    const job=await authorizedJob(outcomeMatch[1],user);
+    if(method==='GET')return json(res,200,{options:OUTCOMES,current:job.fields[F.job.outcome]||'',pending:pendingOutcomes(job).map(e=>({id:e.id,code:e.code,label:outcomeOption(e.code)?.label,reason:e.reason,by:e.by,at:e.at,state:e.state})),version:outcomeVersion(jobView(job,admin))});
+    const b=await requestBody(req),option=outcomeOption(b.code),reason=limit(b.reason,1500),audit=readAudit(job),id='outcome-'+b.operationId;
+    if(!option||reason.length<5||!/^[-a-f0-9]{36}$/.test(b.operationId||''))throw failure(400,'Selecciona el resultado e indica qué ocurrió (al menos cinco caracteres).');
+    let event=audit.find(e=>e.id===id);
+    if(event){if(event.by!==user.username||event.proof!==outcomeProof(event))throw failure(409,'No se pudo verificar esta solicitud.');if(event.state==='approved'||event.state==='requested')return json(res,200,{ok:true,pending:event.state==='requested',unchanged:true});if(event.state==='rejected')throw failure(409,'Esta solicitud fue descartada. Envía una nueva si hay información adicional.');}
+    if(!event){
+      if(b.expected!==outcomeVersion(jobView(job,admin)))throw failure(409,'El trabajo ha cambiado. Actualiza antes de comunicar el resultado.');
+      if(pendingOutcomes(job).length)throw failure(409,'Ya hay un resultado pendiente de revisión.');
+      if(user.canManageRecords){const documents=(await list('orders',[F.order.job,F.order.pdf,F.order.state],3000)).filter(o=>(o.fields[F.order.job]||[]).includes(job.id));if(option.signature&&!documents.some(o=>o.fields[F.order.pdf]?.length&&o.fields[F.order.state]==='Firmado / archivado'))throw failure(409,'Para marcar trabajo terminado, guarda primero la firma del cliente y su parte.');if(!option.signature&&documents.some(o=>o.fields[F.order.pdf]?.length))throw failure(409,'Hay un parte firmado. Revisa su cierre o añade una rectificación desde dirección.');}
+      event={id,kind:'outcome',code:b.code,reason,by:user.username,at:new Date().toISOString(),before:b.expected,state:user.canManageRecords?'applying':'requested'};event.proof=outcomeProof(event);audit.push(event);await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});
+    }
+    if(!user.canManageRecords)return json(res,200,{ok:true,pending:true,notice:'Resultado enviado a Samuel. El trabajo y el cobro no se han cerrado automáticamente.'});
+    return json(res,200,await applyOutcome(await getOne('jobs',job.id),event,user));
+  }
+  const decideOutcome=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/outcomes\/(outcome-[-a-f0-9]{36})\/decision$/);
+  if(decideOutcome&&method==='POST'){
+    reqAdmin(user);if(user.username!==ROOTUSER)throw failure(403,'Samuel debe confirmar el resultado.');
+    const job=await getOne('jobs',decideOutcome[1]),b=await requestBody(req),audit=readAudit(job),event=audit.find(e=>e.id===decideOutcome[2]);
+    if(!event||event.kind!=='outcome'||event.proof!==outcomeProof(event))throw failure(409,'Solicitud de resultado no válida.');
+    if(!['approve','reject'].includes(b.decision))throw failure(400,'Decisión no válida.');
+    if(event.state==='approved'||event.state==='rejected')return json(res,200,{ok:true,unchanged:true});
+    if(b.decision==='reject'){const reason=limit(b.reason,800);if(reason.length<5)throw failure(400,'Indica el motivo para descartar la solicitud.');event.state='rejected';event.reviewedBy=user.username;event.reviewedAt=new Date().toISOString();event.rejectionReason=reason;await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});return json(res,200,{ok:true,notice:'Solicitud descartada. El estado del trabajo y el cobro se conservan.'});}
+    return json(res,200,await applyOutcome(job,event,user));
+  }
   const editMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/direction-edit$/);
   if(editMatch&&(method==='GET'||method==='PATCH')){
     reqAdmin(user);if(user.username!==ROOTUSER)throw failure(403,'Solo la cuenta principal de Samuel puede rectificar trabajos y partes.');
@@ -304,20 +373,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     reqAdmin(user);if(user.username!==ROOTUSER)throw failure(403,'El cierre final requiere la cuenta de Samuel.');
     const b=await requestBody(req),job=await getOne('jobs',approveMatch[1]);
     const order=await getOne('orders',b.orderId),event=reviewEvent(order);
-    if(!(order.fields[F.order.job]||[]).includes(job.id)||!event)throw failure(409,'No es un cierre de este flujo. El histórico se conserva.');
-    if(event.state==='approved')return json(res,200,{ok:true,unchanged:true});
-    if(event.state!=='pending'||order.fields[F.order.state]!=='Firmado / archivado'||!order.fields[F.order.pdf]?.length)throw failure(409,'Falta un parte firmado y archivado.');
-    if(!ACTIVE.has(job.fields[F.job.state])&&job.fields[F.job.state]!=='Terminado')throw failure(409,'El trabajo ha cambiado de estado. Revisión manual necesaria.');
-    const reports=await list('reports',Object.values(F.report),3000);
-    const related=reports.filter(r=>(r.fields[F.report.job]||[]).includes(job.id));
-    if(!related.length)throw failure(409,'No hay partes de ejecución para revisar.');
-    // Recover a failed report-freeze after the immutable PDF was archived.
-    for(const r of related)if(!r.fields[F.report.done])await patch('reports',r.id,{[F.report.done]:true,[F.report.closed]:event.submittedAt});
-    if(job.fields[F.job.state]!=='Terminado')await patch('jobs',job.id,{[F.job.state]:'Terminado'});
-    await patch('orders',order.id,{[F.order.internal]:appendReview(order.fields[F.order.internal],{...event,state:'approved',reviewer:user.username,reviewedAt:new Date().toISOString()})});
-    const saved=await getOne('orders',order.id),savedJob=await getOne('jobs',job.id);
-    if(reviewEvent(saved)?.state!=='approved'||savedJob.fields[F.job.state]!=='Terminado')throw failure(409,'No se ha podido verificar el cierre. Actualiza y revisa.');
-    return json(res,200,{ok:true});
+    return json(res,200,await approveSignedClosure(job,order,user));
   }
 
 
@@ -474,7 +530,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const dashFields=[F.job.ref,F.job.name,F.job.address,F.job.state,F.job.total,F.job.client,F.job.desc,
       F.job.collected,F.job.paymentState,F.job.invoiceRef,F.job.invoiceSent,
       F.job.paymentConfirmed,F.job.invoiceSentAt,F.job.paymentConfirmedAt,
-      F.job.budget,F.job.date,F.job.completedOn];
+      F.job.budget,F.job.date,F.job.completedOn,F.job.outcome];
     const orderFields=[F.order.job,F.order.state,F.order.pdf,F.order.number];
     const [jobs,orders,clients]=await Promise.all([
       list('jobs',dashFields,3000),list('orders',orderFields,3000),list('clients',[F.client.name,F.client.address],3000)
@@ -639,7 +695,7 @@ const server=http.createServer(async(req,res)=>{let writeKey;try{
   if(!['GET','HEAD'].includes(req.method)){
     writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'?'agenda-and-jobs':null;
     if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
-  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'direction-corrections-v3'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
+  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'visit-outcomes-v4'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({

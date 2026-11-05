@@ -4,6 +4,10 @@ import { buildAdminDashboard, isTestRecord } from './admin-dashboard.mjs';
 
 const job=(id,fields)=>({id,fields:{'Nombre del Cliente':'Cliente real',...fields}});
 const order=(id,work,fields)=>({id,fields:{'Trabajo origen':[work],...fields}});
+test('Cierre sin ejecución se muestra separado de cobrado y no inventa deuda',()=>{
+ const data=buildAdminDashboard([job('rec00000000000001',{'Estado':'Cancelado','Resultado intervención (portal)':'No se puede realizar el trabajo'})],[]);
+ assert.equal(data.counts.closedWithoutWork,1);assert.equal(data.counts.closed,0);assert.equal(data.counts.paymentPending,0);assert.equal(data.rows[0].operationallyClosed,true);
+});
 test('Se excluyen pruebas de producción y facturas históricas sin estado operativo',()=>{
  const jobs=[
   job('rec00000000000001',{'Trabajo / referencia':'PRUEBA 2 — NO FACTURAR','Estado':'Terminado'}),

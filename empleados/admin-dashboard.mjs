@@ -1,4 +1,5 @@
 // Panel privado de dirección. Resumen operativo; jamás escribir facturas o importes desde este módulo.
+import { OUTCOMES, OUTCOME_FIELD } from './public/outcomes.js';
 export const ACTIVE_STATUSES=new Set(['Pendiente de visita','Aceptado / Programado','En progreso']);
 const WORK_STATUSES=new Set(['Aceptado / Programado','En progreso','Terminado','Facturado','Pendiente de cobro']);
 const FINAL_STATUSES=new Set(['Terminado','Facturado','Pendiente de cobro']);
@@ -33,7 +34,8 @@ export function buildAdminDashboard(jobs,orders,clients=[]) {
     const f=j.fields||{},status=String(f['Estado']||'');
     if(isTestRecord(f)){excludedTests++;continue;}
     if(!status){unclassified++;continue;}
-    if(['Cancelado','No aceptado / Sin respuesta','Presupuesto pendiente','Presupuesto enviado'].includes(status))continue;
+    const outcome=String(f[OUTCOME_FIELD]||''),outcomeInfo=OUTCOMES.find(o=>o.label===outcome);
+    if(['Cancelado','No aceptado / Sin respuesta','Presupuesto pendiente','Presupuesto enviado'].includes(status)&&!outcome)continue;
     const linked=ordersByJob.get(j.id)||[];
     const signedOrder=linked.find(o=>o.fields?.['Estado parte']==='Firmado / archivado'&&
       (o.fields?.['Parte firmado']||[]).length);
@@ -81,7 +83,7 @@ export function buildAdminDashboard(jobs,orders,clients=[]) {
       id:j.id,reference:String(f['Trabajo / referencia']||'Trabajo sin referencia'),
       client:clientName||'Cliente por completar',
       address,addressFromClient,date:f['Fecha prevista']||f['Fecha realizado']||'',
-      status,invoiceRef,invoiceSent,paymentConfirmed,paymentState,total,paid,
+      status,outcome,closedWithoutWork:!!outcomeInfo?.closed&&outcomeInfo.code!=='completed',operationallyClosed:final||!!outcomeInfo?.closed,invoiceRef,invoiceSent,paymentConfirmed,paymentState,total,paid,
       invoiceConfirmedAt:f['Fecha confirmación envío factura (portal)']||'',
       paymentConfirmedAt:f['Fecha confirmación cobro (portal)']||'',
       budget:String(f['Nº presupuesto']||''),
@@ -109,6 +111,7 @@ export function buildAdminDashboard(jobs,orders,clients=[]) {
       reconciliation:count(r=>r.paymentNeedsReconcile),
       incomplete:count(r=>r.dataIncomplete),
       closed:count(r=>r.closed),
+      closedWithoutWork:count(r=>r.closedWithoutWork),
       notesPaid:count(r=>r.paidReported),
       needsReview:count(r=>r.needsReview)
     },
