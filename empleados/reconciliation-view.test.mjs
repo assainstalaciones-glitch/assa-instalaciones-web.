@@ -52,3 +52,18 @@ test('Una coincidencia documental no confirma el pago del cliente',()=>{
  assert.equal(r.counts.bankVerified,0);
  assert.equal(r.rows[0].reviewRequired,false);
 });
+
+
+test('La aprobación solo cambia estado de revisión documental, no confirma pago ni altera factura',()=>{
+ const data=sample();
+ data.proposals[0].fields['Decisión administración']='Validada sin aplicar';
+ data.proposals[0].fields['Revisado por']='samuel';
+ data.proposals[0].fields['Fecha de decisión']='2026-11-05T00:00:00.000Z';
+ const result=buildReconciliationView(data);
+ assert.equal(result.counts.reviewNeeded,0);
+ assert.equal(result.counts.approved,1);
+ assert.equal(result.counts.bankVerified,0);
+ assert.equal(result.rows[0].reviewRequired,false);
+ assert.equal(result.rows[0].reviewedBy,'samuel');
+ assert.equal(result.rows[0].amount,2190.1);
+});
