@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { AUDIT_FIELD, JOB_EDIT_FIELDS, REPORT_EDIT_FIELDS, editVersion, readAudit, writeAudit, beforeValues, compatibleValues } from './direction-edit.mjs';
 import { validTime, overlap, assignedUsers } from './public/calendar.js';
 import { reviewEvent, appendReview, validDate, scheduleSnapshot, executionSummary } from './workflow.mjs';
 import { readFile, stat } from 'node:fs/promises';
@@ -22,7 +23,7 @@ const ROOTHASH = process.env.BOOTSTRAP_PASSWORD_HASH || '';
 const ready = TOKEN.startsWith('pat') && SECRET.length >= 32 && ROOTUSER && ROOTHASH.startsWith('scrypt$');
 const ACTIVE = new Set(['Aceptado / Programado', 'En progreso', 'Pendiente de visita']);
 const F = {
-  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado' },
+  job:{ ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado', audit:AUDIT_FIELD },
   client:{name:'Nombre',phone:'Teléfono',email:'Email',address:'Dirección'},
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
@@ -38,6 +39,7 @@ function safeUsername(s){return limit(s,30).toLowerCase().replace(/[^a-z0-9_-]/g
 function passwordHash(password, salt = randomBytes(16).toString('hex')) { return `scrypt$${salt}$${scryptSync(password,salt,64).toString('hex')}`; }
 function comparePassword(pass, hash){try{ const [alg,salt,hex]=hash.split('$'); if(alg!=='scrypt'||!salt||!/^[0-9a-f]{128}$/.test(hex))return false; const a=scryptSync(pass,salt,64),b=Buffer.from(hex,'hex'); return timingSafeEqual(a,b); }catch{return false;}}
 function sign(obj){const body=Buffer.from(JSON.stringify(obj)).toString('base64url'); const sig=createHmac('sha256',SECRET).update(body).digest('base64url');return `${body}.${sig}`;}
+function directionProof(e){return createHmac('sha256',SECRET).update(JSON.stringify({id:e.id,at:e.at,by:e.by,reason:e.reason,before:e.before,after:e.after,reportId:e.reportId,reportMode:e.reportMode,reportBefore:e.reportBefore,reportAfter:e.reportAfter})).digest('hex');}
 function verify(token){try{const [body,sig]=token.split('.'); if(!body||!sig)return null; const expected=createHmac('sha256',SECRET).update(body).digest();const got=Buffer.from(sig,'base64url');if(got.length!==expected.length||!timingSafeEqual(got,expected))return null;const data=JSON.parse(Buffer.from(body,'base64url'));if(!Number.isFinite(data.exp)||data.exp<Date.now()||!['administrador','tecnico'].includes(data.role)||!safeUsername(data.user))return null;return data;}catch{return null;}}
 function cookie(res, value, clear=false){res.setHeader('Set-Cookie',`assa_session=${value}; HttpOnly; Secure; SameSite=Strict; Path=/; ${clear?'Max-Age=0':'Max-Age=43200'}`);}
 function json(res,status,obj){const data=JSON.stringify(obj);res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(data);}
@@ -145,10 +147,11 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(!account){const users=await list('users',Object.values(F.user));const a=users.find(x=>x.fields[F.user.username]===uname&&x.fields[F.user.active]===true);if(a&&comparePassword(pass,a.fields[F.user.hash]||''))account={username:uname,role:a.fields[F.user.role],name:a.fields[F.user.name]||uname};}
     if(account&&!['administrador','tecnico'].includes(account.role))account=null;
     if(!account)throw failure(401,'Usuario o contraseña incorrectos.');
+    account.canManageRecords=account.role==='administrador'&&uname===ROOTUSER;
     cookie(res,sign({user:uname,role:account.role,exp:Date.now()+12*3600000}));return json(res,200,{user:account});
   }
   if(p==='/api/logout'&&method==='POST'){cookie(res,'',true);return json(res,200,{ok:true});}
-  const user=await identify(req);reqAuth(user);const admin=user.role==='administrador';
+  const user=await identify(req);reqAuth(user);const admin=user.role==='administrador';user.canManageRecords=admin&&user.username===ROOTUSER;
   if(p==='/api/me'&&method==='GET')return json(res,200,{user});
   if(p==='/api/jobs'&&method==='GET'){
     const all=await list('jobs',Object.values(F.job),1000);let filtered=all.filter(x=>admin||assigned(x,user));if(!admin){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);const pendingSigned=new Set(orders.filter(o=>o.fields[F.order.state]==='Firmado / archivado'&&!!o.fields[F.order.pdf]?.length&&reviewEvent(o)?.state==='pending').flatMap(o=>o.fields[F.order.job]||[]));filtered=filtered.filter(x=>ACTIVE.has(x.fields[F.job.state])&&!pendingSigned.has(x.id));}
@@ -166,6 +169,74 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   if(toggle&&method==='PATCH'){reqAdmin(user);const b=await requestBody(req);await patch('users',toggle[1],{[F.user.active]:b.active===true});return json(res,200,{ok:true});}
   const jobMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})$/);
   if(jobMatch&&method==='GET'){const j=await authorizedJob(jobMatch[1],user);return json(res,200,{job:jobView(j,admin)});}
+  const editMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/direction-edit$/);
+  if(editMatch&&(method==='GET'||method==='PATCH')){
+    reqAdmin(user);if(user.username!==ROOTUSER)throw failure(403,'Solo la cuenta principal de Samuel puede rectificar trabajos y partes.');
+    const job=await getOne('jobs',editMatch[1]);
+    const all=await list('reports',Object.values(F.report),3000),reports=all.filter(r=>(r.fields[F.report.job]||[]).includes(job.id));
+    const orders=(await list('orders',[F.order.job,F.order.pdf,F.order.state],3000)).filter(o=>(o.fields[F.order.job]||[]).includes(job.id));
+    const signed=orders.some(o=>o.fields[F.order.pdf]?.length),audit=readAudit(job);
+    if(method==='GET')return json(res,200,{job:{...jobView(job,true),email:job.fields[F.job.email]||''},reports:reports.map(reportView),signed,version:editVersion(job,reports),history:audit});
+    const b=await requestBody(req),reason=limit(b.reason,800);
+    if(reason.length<5||!/^[-a-f0-9]{36}$/.test(b.operationId||''))throw failure(400,'Indica un motivo de al menos cinco caracteres.');
+    let event=audit.find(e=>e.id===b.operationId);
+    if(event&&(event.by!==user.username||event.proof!==directionProof(event)))throw failure(409,'La corrección pendiente no supera la verificación. Revisa el historial.');
+    if(event?.state==='applied')return json(res,200,{ok:true,unchanged:true,notice:'Esta corrección ya está guardada.'});
+    if(!event){
+      if(b.expected!==editVersion(job,reports))throw failure(409,'El trabajo o el parte han cambiado. Actualiza y revisa antes de guardar.');
+      const changes={};
+      for(const [key,value] of Object.entries(b.changes||{})){
+        if(!Object.hasOwn(JOB_EDIT_FIELDS,key))throw failure(400,'Ese campo no se puede editar desde dirección.');
+        if(typeof value!=='string')throw failure(400,'Datos de trabajo no válidos.');
+        const max=key==='description'?220:key==='phone'?50:key==='assigned'?2000:250;
+        if(value.length>max)throw failure(400,'Uno de los datos supera la longitud permitida.');
+        const cleaned=value.trim();if(['client','description'].includes(key)&&!cleaned)throw failure(400,'El cliente y la descripción no pueden quedar vacíos.');
+        if(key==='email'&&cleaned&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned))throw failure(400,'Correo electrónico inválido.');
+        if(key==='phone'&&cleaned&&!/^[+()0-9 .\/-]{6,50}$/.test(cleaned))throw failure(400,'Teléfono inválido.');
+        const field=JOB_EDIT_FIELDS[key],after=cleaned||null;if((job.fields[field]??null)!==after)changes[field]=after;
+      }
+      const combined={...job.fields,...changes},users=assignedUsers(combined[F.job.assigned]);
+      if(Object.hasOwn(changes,F.job.assigned)){
+        const allowed=new Set((await list('users',Object.values(F.user))).filter(r=>r.fields[F.user.active]===true&&r.fields[F.user.role]==='tecnico').map(r=>r.fields[F.user.username]));
+        const previousUsers=assignedUsers(job.fields[F.job.assigned]);
+        if(users.some(u=>!allowed.has(u)&&!previousUsers.includes(u)))throw failure(400,'Solo se pueden añadir técnicos activos.');
+      }
+      if([F.job.date,F.job.start,F.job.end,F.job.assigned].some(k=>Object.hasOwn(changes,k)))await checkSlot({date:combined[F.job.date]||'',start:combined[F.job.start]||'',end:combined[F.job.end]||'',users,exclude:job.id});
+      let report=null,reportChanges={},reportMode='none';
+      if(b.reportId){
+        report=reports.find(r=>r.id===b.reportId);if(!report)throw failure(400,'El parte no pertenece a este trabajo.');
+        for(const [key,value] of Object.entries(b.reportChanges||{})){
+          if(!Object.hasOwn(REPORT_EDIT_FIELDS,key))throw failure(400,'Campo de parte no permitido.');
+          let after;if(key==='hours'){after=value===''||value===null?null:Number(value);if(after!==null&&(!Number.isFinite(after)||after<0||after>24))throw failure(400,'Horas inválidas.');}
+          else{if(typeof value!=='string'||value.length>10000)throw failure(400,'Datos de parte no válidos.');after=value.trim()||null;if(key==='date'&&after&&!validDate(after))throw failure(400,'Fecha del parte inválida.');}
+          const field=REPORT_EDIT_FIELDS[key];if((report.fields[field]??null)!==after)reportChanges[field]=after;
+        }
+        reportMode=signed||report.fields[F.report.done]?'annotation':'edit';
+      }
+      if(!Object.keys(changes).length&&!Object.keys(reportChanges).length)throw failure(400,'No hay cambios que guardar.');
+      event={id:b.operationId,state:'pending',at:new Date().toISOString(),by:user.username,reason,
+        before:beforeValues(job.fields,changes),after:changes,reportId:report?.id||null,reportMode,
+        reportBefore:report?beforeValues(report.fields,reportChanges):{},reportAfter:reportChanges};
+      event.proof=directionProof(event);audit.push(event);await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});
+    }
+    if(!['edit','annotation','none'].includes(event.reportMode)||Object.keys(event.after||{}).some(k=>!Object.values(JOB_EDIT_FIELDS).includes(k))||Object.keys(event.reportAfter||{}).some(k=>!Object.values(REPORT_EDIT_FIELDS).includes(k)))throw failure(409,'El historial contiene campos no permitidos.');
+    const latest=await getOne('jobs',job.id);
+    if(!compatibleValues(latest.fields,event.before,event.after))throw failure(409,'Hay una edición posterior del trabajo. No se ha sobrescrito.');
+    let report;if(event.reportId){report=await getOne('reports',event.reportId);if(!(report.fields[F.report.job]||[]).includes(job.id)||!compatibleValues(report.fields,event.reportBefore,event.reportAfter))throw failure(409,'El parte ha cambiado. No se ha sobrescrito.');}
+    if(Object.keys(event.after).length)await patch('jobs',job.id,event.after);
+    if(report&&event.reportMode==='edit'&&Object.keys(event.reportAfter).length){
+      const currentOrders=(await list('orders',[F.order.job,F.order.pdf],3000)).filter(o=>(o.fields[F.order.job]||[]).includes(job.id));
+      if(report.fields[F.report.done]||currentOrders.some(o=>o.fields[F.order.pdf]?.length))throw failure(409,'El parte se ha cerrado durante la corrección. Actualiza antes de continuar.');
+      await patch('reports',report.id,event.reportAfter);
+    }
+    const saved=await getOne('jobs',job.id);
+    if(Object.keys(event.after).some(k=>JSON.stringify(saved.fields[k]??null)!==JSON.stringify(event.after[k]??null)))throw failure(409,'No se ha podido verificar el trabajo corregido.');
+    if(report&&event.reportMode==='edit'){const savedReport=await getOne('reports',report.id);if(Object.keys(event.reportAfter).some(k=>JSON.stringify(savedReport.fields[k]??null)!==JSON.stringify(event.reportAfter[k]??null)))throw failure(409,'No se ha podido verificar el parte corregido.');}
+    const currentAudit=readAudit(saved),savedEvent=currentAudit.find(e=>e.id===event.id);if(!savedEvent)throw failure(409,'No se ha podido verificar el historial.');
+    savedEvent.state='applied';savedEvent.appliedAt=new Date().toISOString();await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(currentAudit)});
+    const verified=await getOne('jobs',job.id);if(!readAudit(verified).some(e=>e.id===event.id&&e.state==='applied'))throw failure(409,'No se ha podido verificar la auditoría.');
+    return json(res,200,{ok:true,notice:event.reportMode==='annotation'?'Rectificación añadida al historial. El parte cerrado y su PDF original se conservan.':'Corrección de dirección guardada con historial. No se ha cambiado el estado del trabajo.'});
+  }
   const scheduleMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/schedule$/);
   if(scheduleMatch&&method==='PATCH'){
     reqAdmin(user);
@@ -568,7 +639,7 @@ const server=http.createServer(async(req,res)=>{let writeKey;try{
   if(!['GET','HEAD'].includes(req.method)){
     writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'?'agenda-and-jobs':null;
     if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
-  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'monthly-calendar-v2'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
+  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'direction-corrections-v3'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({

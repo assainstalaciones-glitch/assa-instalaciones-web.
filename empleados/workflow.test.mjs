@@ -83,6 +83,20 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal((await call('/jobs/'+other+'/schedule','samuel','PATCH',{...appointment,end:'08:00'})).status,400);
     assert.equal((await call('/jobs/'+other+'/schedule','samuel','PATCH',appointment)).status,200);
   });
+  await t.test('Dirección corrige ficha y parte de Saúl en Presupuesto pendiente, con motivo y sin cerrar el trabajo',async()=>{
+    const job=tables.tblsVLKBSafEEiUlI[0],report=tables.tblprtqasdBxVVsNx[0];job.fields.Estado='Presupuesto pendiente';
+    assert.equal((await call('/jobs/'+jid+'/direction-edit','saul')).status,403);
+    const current=(await call('/jobs/'+jid+'/direction-edit','samuel')).data;
+    const correction={operationId:'22222222-2222-4222-8222-222222222222',expected:current.version,reason:'Corregir el diagnóstico de la visita',changes:{description:'Diagnóstico y presupuesto de reparación'},reportId:rid,reportChanges:{hours:1,notes:'Es necesario soldar antes de restablecer la presión.'}};
+    assert.equal((await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',{...correction,reason:''})).status,400);
+    assert.equal((await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',{...correction,changes:{paymentConfirmed:'false'}})).status,400);
+    const r=await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',correction);assert.equal(r.status,200,JSON.stringify(r.data));
+    assert.equal(job.fields.Estado,'Presupuesto pendiente');assert.equal(report.fields['Usuario operario'],'saul');assert.equal(report.fields['Horas reales'],1);
+    assert.equal(JSON.parse(job.fields['Historial dirección (portal)'])[0].reportBefore['Horas reales'],2);
+    const count=writes.length;assert.equal((await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',correction)).status,200);assert.equal(writes.length,count);
+    assert.equal((await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',{...correction,operationId:'33333333-3333-4333-8333-333333333333'})).status,409);
+    job.fields.Estado='En progreso';
+  });
   const signature='data:image/png;base64,'+Buffer.concat([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR2sAAAAASUVORK5CYII=','base64'),Buffer.alloc(150)]).toString('base64');
   await t.test('Firma conserva PDF y parte, deja trabajo abierto para Samuel',async()=>{
     const r=await call('/jobs/'+jid+'/sign','saul','POST',{signer:'Cliente simulado',accepted:true,signature});
@@ -92,9 +106,12 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal((await call('/admin/closures','samuel')).data.closures.length,1);
   });
   await t.test('Firma repetida no duplica OT y ejecución firmada no se sobrescribe',async()=>{
-    assert.equal((await call('/jobs/'+jid+'/sign','saul','POST',{signer:'Cliente simulado',accepted:true,signature})).status,200);
+    assert.equal((await call('/jobs/'+jid+'/sign','saul','POST',{signer:'Cliente simulado',accepted:true,signature})).status,403);
     assert.equal(tables.tblvZgkNh2cX1bTNx.length,1);
-    assert.equal((await call('/jobs/'+jid+'/reports','saul','POST',{hours:3})).status,409);
+    assert.equal((await call('/jobs/'+jid+'/reports','saul','POST',{hours:3})).status,403);
+    assert.equal((await call('/jobs','saul')).data.jobs.some(j=>j.id===jid),false);
+    assert.equal((await call('/jobs/'+jid,'saul')).status,403);
+    assert.equal((await call('/jobs/'+jid,'samuel')).status,200);
     assert.equal((await call('/jobs/'+jid+'/schedule','samuel','PATCH',{...schedule,expected:{date:'2026-11-06',assigned:'saul'}})).status,409);
   });
   await t.test('Samuel aprueba una sola vez, con auditoría y sin datos financieros',async()=>{
@@ -104,6 +121,14 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal(tables.tblsVLKBSafEEiUlI[0].fields.Estado,'Terminado');assert.equal(reviewEvent(tables.tblvZgkNh2cX1bTNx[0]).reviewer,'samuel');
     assert.equal((await call('/jobs')).data.jobs.some(j=>j.id===jid),false);
     for(const w of writes)for(const k of Object.keys(w.fields||{}))assert.ok(!/factura|cobro|cobrado|importe/i.test(k));
+  });
+  await t.test('Un parte firmado admite rectificación auditada de dirección, conservando el original y su PDF',async()=>{
+    const current=(await call('/jobs/'+jid+'/direction-edit','samuel')).data,report=tables.tblprtqasdBxVVsNx[0],original=JSON.stringify(report),pdf=JSON.stringify(tables.tblvZgkNh2cX1bTNx[0]);
+    const correction={operationId:'44444444-4444-4444-8444-444444444444',expected:current.version,reason:'Aclaración posterior de las horas',changes:{address:'Dirección corregida'},reportId:rid,reportChanges:{hours:1.5}};
+    const r=await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',correction);assert.equal(r.status,200,JSON.stringify(r.data));
+    assert.equal(JSON.stringify(report),original);assert.equal(JSON.stringify(tables.tblvZgkNh2cX1bTNx[0]),pdf);
+    assert.equal(tables.tblsVLKBSafEEiUlI[0].fields.Estado,'Terminado');
+    const history=(await call('/jobs/'+jid+'/direction-edit','samuel')).data.history;assert.equal(history.at(-1).reportMode,'annotation');assert.equal(history.at(-1).reportAfter['Horas reales'],1.5);
   });
   await t.test('Desactivar técnico revoca acceso; rol desconocido no autentica',async()=>{
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=false;assert.equal((await call('/me')).status,401);
