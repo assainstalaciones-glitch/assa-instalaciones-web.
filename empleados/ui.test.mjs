@@ -19,6 +19,12 @@ test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>
   assert.equal((app.innerHTML.match(/data-calendar-date=/g)||[]).length,42);assert.match(app.innerHTML,/Hora pendiente/);assert.match(app.innerHTML,/Añadir a la agenda/);
   ui.state.agendaNotes=[{id:'rec00000000000007',title:'Reunión proveedor',kind:'Reunión',date:'2026-11-05',start:'',end:'',location:'Oficina',notes:'Revisar catálogo'}];ui.state.newAppointment=true;ui.state.newAppointmentMode='free';
   ui.renderAgenda();assert.match(app.innerHTML,/Reunión proveedor/);assert.match(app.innerHTML,/freeAppointmentForm/);assert.doesNotMatch(app.innerHTML,/id="appointmentClient"/);ui.state.newAppointment=false;
+  const canceledJob={...job,id:'rec00000000000022',client:'Mongas cancelada',status:'Cancelado',outcome:'Cancelado',assigned:'saul'};
+  const plannedJob={...job,id:'rec00000000000023',client:'Visita pendiente',status:'Aceptado / Programado'};
+  ui.state.jobs.push(canceledJob,plannedJob);ui.state.agendaNotes.push({id:'rec00000000000024',title:'Recordatorio cancelado',kind:'Recordatorio',date:'2026-11-05',status:'Cancelada'});
+  ui.renderAgenda();assert.doesNotMatch(app.innerHTML,/Mongas cancelada/);assert.doesNotMatch(app.innerHTML,/Recordatorio cancelado/);assert.match(app.innerHTML,/data-agenda-work-action="cancel"/);assert.match(app.innerHTML,/data-agenda-note-action="cancel"/);
+  ui.state.agendaShowCancelled=true;ui.renderAgenda();assert.match(app.innerHTML,/Mongas cancelada/);assert.match(app.innerHTML,/Recordatorio cancelado/);assert.match(app.innerHTML,/data-agenda-work-action="restore"/);assert.match(app.innerHTML,/data-agenda-note-action="restore"/);
+  ui.state.agendaShowCancelled=false;ui.state.jobs=[job];ui.state.agendaNotes=[];
   ui.state.dashboard={};ui.state.closures=[{id:'rec00000000000003',job,event:{submittedBy:'saul'},signed:true}];ui.state.canApprove=true;
   ui.renderDashboard();assert.match(app.innerHTML,/Cierres pendientes de Samuel/);assert.match(app.innerHTML,/data-approve-job=/);
   ui.state.job=job;ui.renderWork();assert.match(app.innerHTML,/scheduleDate/);assert.match(app.innerHTML,/Parte de ejecución/);assert.match(app.innerHTML,/Fotografías del trabajo/);
