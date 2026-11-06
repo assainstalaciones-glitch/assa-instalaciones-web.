@@ -22,7 +22,8 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     tblsVLKBSafEEiUlI:[{id:jid,fields:{'Trabajo / referencia':'Encargo','Nombre del Cliente':'Cliente simulado','Estado':'En progreso','Operarios asignados portal':'saul','Fecha prevista':'2026-11-05','Importe cobrado':500,'Cobro confirmado (portal)':true}},{id:other,fields:{'Estado':'En progreso','Operarios asignados portal':'alex'}}],
     tblZURy4PjvmL1Kr0:[{id:'rec00000000000005',fields:{'Usuario':'saul','Rol':'tecnico','Activo':true}},{id:'rec00000000000006',fields:{'Usuario':'alex','Rol':'tecnico','Activo':true}}],
     tblprtqasdBxVVsNx:[{id:rid,fields:{'Trabajo':[jid],'Usuario operario':'saul','Horas reales':2,'Observaciones':'Instalación probada','Fecha trabajo':'2026-11-05'}}],
-    tblvZgkNh2cX1bTNx:[]
+    tblvZgkNh2cX1bTNx:[],
+    tblKc1Tvz45Fu5J9b:[]
   };
   const writes=[];const originalFetch=globalThis.fetch;
   globalThis.fetch=async(input,opts={})=>{
@@ -39,7 +40,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     if(method==='GET')return Response.json(id?records.find(r=>r.id===id):{records});
     writes.push({table,id,method,fields:body.fields});
     if(method==='PATCH'){const r=records.find(r=>r.id===id);assert.ok(r);Object.assign(r.fields,body.fields);return Response.json(r);}
-    assert.ok(['tblvZgkNh2cX1bTNx','tblsVLKBSafEEiUlI'].includes(table));const r={id:table==='tblvZgkNh2cX1bTNx'?oid:'rec'+String(records.length+100).padStart(14,'0'),fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
+    assert.ok(['tblvZgkNh2cX1bTNx','tblsVLKBSafEEiUlI','tblKc1Tvz45Fu5J9b'].includes(table));const r={id:table==='tblvZgkNh2cX1bTNx'?oid:'rec'+String(records.length+100).padStart(14,'0'),fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
   };
   t.after(()=>{globalThis.fetch=originalFetch;});
   const call=async(path,user='saul',method='GET',data)=>{
@@ -86,7 +87,18 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal((await call('/jobs/'+other+'/schedule','samuel','PATCH',{...appointment,end:'08:00'})).status,400);
     assert.equal((await call('/jobs/'+other+'/schedule','samuel','PATCH',appointment)).status,200);
   });
-  await t.test('Dirección corrige ficha y parte de Saúl en Presupuesto pendiente, con motivo y sin cerrar el trabajo',async()=>{
+   await t.test('Cita libre sin cliente, intermediario ni técnico; permisos y reintento sin duplicar',async()=>{
+  const initialJobs=tables.tblsVLKBSafEEiUlI.length;
+  const b={operationId:'12345678-1234-4123-8123-123456789aba',title:'Reunión con proveedor',date:'2026-11-09',start:'',end:'',kind:'Reunión',location:'Oficina',notes:'Traer catálogo'};
+  assert.equal((await call('/agenda-notes','saul')).status,403);assert.equal((await call('/agenda-notes','saul','POST',b)).status,403);
+  const first=await call('/agenda-notes','samuel','POST',b);assert.equal(first.status,201,JSON.stringify(first.data));assert.equal(first.data.note.title,b.title);
+  assert.equal(tables.tblsVLKBSafEEiUlI.length,initialJobs);
+  const before=writes.length;assert.equal((await call('/agenda-notes','samuel','POST',b)).status,200);assert.equal(writes.length,before);
+  const view=await call('/agenda-notes','samuel');assert.equal(view.status,200);assert.equal(view.data.notes.length,1);
+  assert.equal((await call('/agenda-notes','samuel','POST',{...b,operationId:'12345678-1234-4123-8123-123456789abb',date:'2026-02-30'})).status,400);
+  assert.equal((await call('/agenda-notes','samuel','POST',{...b,operationId:'12345678-1234-4123-8123-123456789abc',end:'10:00'})).status,400);
+ });
+ await t.test('Dirección corrige ficha y parte de Saúl en Presupuesto pendiente, con motivo y sin cerrar el trabajo',async()=>{
     const job=tables.tblsVLKBSafEEiUlI[0],report=tables.tblprtqasdBxVVsNx[0];job.fields.Estado='Presupuesto pendiente';
     assert.equal((await call('/jobs/'+jid+'/direction-edit','saul')).status,403);
     const current=(await call('/jobs/'+jid+'/direction-edit','samuel')).data;
