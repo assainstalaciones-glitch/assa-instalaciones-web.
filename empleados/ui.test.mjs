@@ -35,6 +35,6 @@ test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>
   ui.state.directionEdit={job:{...job,status:'Presupuesto pendiente'},reports:[{id:'rec00000000000004',user:'saul',hours:1,notes:'Diagnóstico',date:'2026-11-05',material:'Material original'}],history:[],version:'test'};
   ui.renderDirectionEdit();assert.match(app.innerHTML,/Presupuesto pendiente/);assert.match(app.innerHTML,/Material original/);assert.match(app.innerHTML,/Motivo de la corrección/);assert.doesNotMatch(app.innerHTML,/editReportHours[^>]*disabled/);
   ui.state.me={username:'saul',role:'tecnico'};ui.renderAgenda();assert.doesNotMatch(app.innerHTML,/data-nav="dashboard"/);assert.doesNotMatch(app.innerHTML,/agendaTech/);
-  ui.renderWork();assert.doesNotMatch(app.innerHTML,/saveAssign/);assert.match(app.innerHTML,/Firmar y enviar a revisión/);
+  ui.renderWork();assert.doesNotMatch(app.innerHTML,/saveAssign/);assert.match(app.innerHTML,/Terminar y firmar/);assert.match(app.innerHTML,/Guardar sin finalizar/);assert.match(app.innerHTML,/Cambiar fecha de la jornada/);assert.match(app.innerHTML,/name="date" value=/);assert.match(app.innerHTML,/comunicar incidencia o siguiente paso/);
 });
 
