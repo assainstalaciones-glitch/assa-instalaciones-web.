@@ -1,0 +1,53 @@
+name: ASSA | Pruebas de calidad y seguridad del portal
+on:
+  push:
+    branches:
+      - portal-empleados-v1
+    paths:
+      - 'empleados/**'
+      - '.github/workflows/assa-portal-quality.yml'
+  schedule:
+    # GitHub programa en UTC y puede retrasar el inicio; no es una alarma exacta.
+    - cron: '20 6,15 * * 1-5'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: assa-portal-quality
+  cancel-in-progress: false
+jobs:
+  simulated-workflow:
+    name: Validar flujo simulado sin datos reales
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Leer la rama del portal
+        uses: actions/checkout@v4
+        with:
+          ref: portal-empleados-v1
+          persist-credentials: false
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar dependencias del portal
+        working-directory: empleados
+        run: npm install --omit=dev --no-audit --no-fund
+      - name: Tests de permisos, agenda, partes, firmas, cierres y conciliación simulados
+        working-directory: empleados
+        run: npm test
+      - name: Probar disponibilidad pública de producción (solo ejecución programada)
+        if: ${{ github.event_name == 'schedule' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if curl -fsS --max-time 45 "https://assa-portal-empleados.onrender.com/health" | grep -q '"configured":true'; then
+              echo "Portal HTTP saludable y configurado."
+              exit 0
+            fi
+            echo "Salud no verificada: intento ${attempt} de 3."
+            sleep 12
+          done
+          echo "No se pudo verificar el portal público; revisar Render."
+          exit 1
