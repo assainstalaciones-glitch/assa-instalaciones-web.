@@ -13,7 +13,7 @@ test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>
   const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',addEventListener(){},querySelector:x=>node(x),querySelectorAll:()=>[],getContext:()=>({fillRect(){}})});return nodes.get(id);};
   const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},FormData:class {entries(){return [][Symbol.iterator]();}},...recovery,...calendar,...outcomes,...relationships,changedJobFields,fifteenDayRange});
   const code=readFileSync(new URL('./public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/init\(\);\s*$/,'');
-  vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={state,renderAgenda,renderDashboard,renderWork,renderSign,renderDirectionEdit};",context);
+  vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={state,renderAgenda,renderDashboard,renderWork,renderSign,renderDirectionEdit,renderJobs,renderToday};",context);
   const ui=context.ui,app=node('#app');
   const job={id:'rec00000000000001',client:'Cliente <prueba>',reference:'Trabajo',status:'En progreso',assigned:'saul',address:'Calle Mayor, Cambrils',phone:'600123456',date:'2026-11-05'};
   ui.state.me={username:'samuel',role:'administrador',name:'Samuel',canManageRecords:true};ui.state.jobs=[job];ui.state.employees=[{username:'saul',active:true,role:'tecnico'}];ui.state.agendaDate=job.date;ui.state.agendaMonth=job.date.slice(0,7);
@@ -36,5 +36,10 @@ test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>
   ui.renderDirectionEdit();assert.match(app.innerHTML,/Presupuesto pendiente/);assert.match(app.innerHTML,/Material original/);assert.match(app.innerHTML,/Motivo de la corrección/);assert.doesNotMatch(app.innerHTML,/editReportHours[^>]*disabled/);
   ui.state.me={username:'saul',role:'tecnico'};ui.renderAgenda();assert.doesNotMatch(app.innerHTML,/data-nav="dashboard"/);assert.doesNotMatch(app.innerHTML,/agendaTech/);
   ui.renderWork();assert.doesNotMatch(app.innerHTML,/saveAssign/);assert.match(app.innerHTML,/Terminar y firmar/);assert.match(app.innerHTML,/Guardar sin finalizar/);assert.match(app.innerHTML,/Cambiar fecha de la jornada/);assert.match(app.innerHTML,/name="date" value=/);assert.match(app.innerHTML,/comunicar incidencia o siguiente paso/);
+  ui.state.me={username:'samuel',role:'administrador',name:'Samuel',canManageRecords:true};ui.state.viewMode='instalador';ui.state.job={...job,assigned:'samuel'};
+  ui.renderWork();assert.match(app.innerHTML,/Terminar y firmar/);assert.match(app.innerHTML,/data-switch-mode/);assert.match(app.innerHTML,/Volver a Dirección/);assert.doesNotMatch(app.innerHTML,/Editar trabajo y parte/);assert.doesNotMatch(app.innerHTML,/Guardar planificación/);assert.doesNotMatch(app.innerHTML,/Costes del trabajo/);
+  ui.state.jobs=[{...job,id:'rec00000000000011',assigned:'saul'},{...job,id:'rec00000000000012',assigned:'samuel',client:'Trabajo Samuel'}];ui.renderJobs();assert.match(app.innerHTML,/Trabajo Samuel/);assert.doesNotMatch(app.innerHTML,/Cliente &lt;prueba&gt;/);assert.match(app.innerHTML,/Ver otros trabajos abiertos/);
+  ui.state.showAllTechnicianJobs=true;ui.renderJobs();assert.match(app.innerHTML,/Cliente &lt;prueba&gt;/);
+  ui.state.viewMode='direccion';ui.state.showAllTechnicianJobs=false;ui.renderWork();assert.match(app.innerHTML,/Editar trabajo y parte/);assert.match(app.innerHTML,/Guardar planificación/);
 });
 
