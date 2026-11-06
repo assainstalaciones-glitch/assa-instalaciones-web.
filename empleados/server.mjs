@@ -34,7 +34,7 @@ const F = {
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',actualStart:'Hora entrada real (portal)',actualEnd:'Hora salida real (portal)',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
   order:{job:'Trabajo origen',operator:'Operario',date:'Fecha instalación',time:'Hora citada',client:'Cliente',address:'Dirección',city:'Población',postal:'Código postal',phone:'Teléfono',email:'Correo electrónico',taxId:'NIF / DNI',budget:'Nº presupuesto',budgetDate:'Fecha presupuesto',previousNotes:'Observaciones previas',title:'Motivo del trabajo',detail:'Trabajos a realizar / partidas',base:'Base imponible',vat:'IVA',total:'Total IVA incluido',payment:'Forma de pago',state:'Estado parte',pdf:'Parte firmado',number:'Número de orden',internal:'Notas internas'},
   visit:{title:'Visita / servicio solicitado',job:'Trabajo existente',client:'Cliente existente',contact:'Contacto por identificar',service:'Servicio',address:'Dirección de la visita',measures:'Mediciones',material:'Materiales y equipos',workers:'Operarios estimados',hours:'Horas estimadas por operario',access:'Incidencias y acceso',photos:'Fotos',notes:'Notas',next:'Siguiente paso',date:'Fecha visita',tech:'Técnico de la visita'},
- freeAgenda:{title:'Título',date:'Fecha',start:'Hora inicio',end:'Hora fin',kind:'Tipo',location:'Lugar',notes:'Observaciones',createdBy:'Creado por',operation:'Operación ID'}
+ freeAgenda:{title:'Título',date:'Fecha',start:'Hora inicio',end:'Hora fin',kind:'Tipo',location:'Lugar',notes:'Observaciones',createdBy:'Creado por',operation:'Operación ID',status:'Estado agenda',history:'Historial agenda'}
 };
 const FIELD_PHOTOS = { reports:'fldi3uQwhsfp7anwe', visits:'fldp141UFEZVquqTN' };
 const MIME = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml'};
@@ -77,7 +77,7 @@ function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failu
 function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
 async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
 function signedPendingClosure(order,jobId){return (order.fields[F.order.job]||[]).includes(jobId)&&order.fields[F.order.state]==='Firmado / archivado'&&!!order.fields[F.order.pdf]?.length&&reviewEvent(order)?.state==='pending';}
-function freeAgendaView(record){const f=record.fields;return {id:record.id,title:f[F.freeAgenda.title]||'',date:f[F.freeAgenda.date]||'',start:f[F.freeAgenda.start]||'',end:f[F.freeAgenda.end]||'',kind:f[F.freeAgenda.kind]||'Cita libre',location:f[F.freeAgenda.location]||'',notes:f[F.freeAgenda.notes]||''};}
+function freeAgendaView(record){const f=record.fields;return {id:record.id,title:f[F.freeAgenda.title]||'',date:f[F.freeAgenda.date]||'',start:f[F.freeAgenda.start]||'',end:f[F.freeAgenda.end]||'',kind:f[F.freeAgenda.kind]||'Cita libre',location:f[F.freeAgenda.location]||'',notes:f[F.freeAgenda.notes]||'',status:f[F.freeAgenda.status]||'Activa'};}
 function jobView(record,admin){const f=record.fields;const data={partnerInstallation:f[I.mode]===INSTALLATION_MODE,installationUnits:f[I.units]??null,executedOn:f[I.executedOn]||'',...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:(f[I.mode]===INSTALLATION_MODE&&f[REL_FIELDS.partnerName])||f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
 async function otJobData(job,order){
   const j=job.fields||{},o=order?.fields||{};
@@ -391,11 +391,62 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if((start&&!validTime(start))||(end&&(!start||!validTime(end)||end<=start)))throw failure(400,'Revisa la hora de inicio y fin de la cita.');
     const existing=(await list('freeAgenda',Object.values(F.freeAgenda),3000)).find(n=>n.fields[F.freeAgenda.operation]===b.operationId);
     if(existing)return json(res,200,{note:freeAgendaView(existing),unchanged:true});
-    const fields={[F.freeAgenda.title]:title,[F.freeAgenda.date]:date,[F.freeAgenda.kind]:b.kind||'Cita libre',[F.freeAgenda.createdBy]:user.username,[F.freeAgenda.operation]:b.operationId};
+    const fields={[F.freeAgenda.title]:title,[F.freeAgenda.date]:date,[F.freeAgenda.kind]:b.kind||'Cita libre',[F.freeAgenda.createdBy]:user.username,[F.freeAgenda.operation]:b.operationId,[F.freeAgenda.status]:'Activa'};
     if(start)fields[F.freeAgenda.start]=start;if(end)fields[F.freeAgenda.end]=end;
     if(limit(b.location,220))fields[F.freeAgenda.location]=limit(b.location,220);if(limit(b.notes,2000))fields[F.freeAgenda.notes]=limit(b.notes,2000);
     const saved=await create('freeAgenda',fields);
     return json(res,201,{note:freeAgendaView(saved),notice:'Anotación guardada en tu agenda. No se ha creado un cliente ni una orden de trabajo.'});
+  }
+  // La agenda permite anular y recuperar reservas sin borrar expedientes ni tocar finanzas.
+  const agendaJobMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/agenda-state$/);
+  if(agendaJobMatch&&method==='PATCH'){
+    reqAdmin(user);if(user.username!==ROOTUSER)throw failure(403,'Solo Samuel puede cancelar o recuperar trabajos.');
+    const b=await requestBody(req),action=b.action;
+    if(!['cancel','restore'].includes(action)||!/^[-a-f0-9]{36}$/.test(b.operationId||''))throw failure(400,'Operación de agenda no válida.');
+    const job=await getOne('jobs',agendaJobMatch[1]),before=jobView(job,true),audit=readAudit(job),id='agenda-'+b.operationId;
+    if(audit.some(e=>e.id===id&&e.kind==='agenda-status'&&e.action===action))return json(res,200,{ok:true,unchanged:true,job:before});
+    if(b.expected?.status!==before.status||b.expected?.outcome!==(before.outcome||''))throw failure(409,'El trabajo ha cambiado. Actualiza la agenda antes de continuar.');
+    if(action==='cancel'&&!['Aceptado / Programado','Pendiente de visita'].includes(before.status))throw failure(409,'Solo se pueden anular desde la agenda citas aún no iniciadas. Consulta el trabajo para otros casos.');
+    if(action==='restore'&&before.status!=='Cancelado')throw failure(409,'Solo se puede recuperar una cita cancelada.');
+    const [orders,reports]=await Promise.all([list('orders',[F.order.job,F.order.pdf,F.order.state,F.order.internal],3000),list('reports',[F.report.job,F.report.hours,F.report.done,F.report.material,F.report.notes],3000)]);
+    const relatedOrders=orders.filter(o=>(o.fields[F.order.job]||[]).includes(job.id));
+    if(relatedOrders.some(o=>o.fields[F.order.pdf]?.length||reviewEvent(o)?.state==='pending'))throw failure(409,'El trabajo tiene un parte firmado o pendiente de cierre. Debes revisarlo desde dirección.');
+    const relatedReports=reports.filter(r=>(r.fields[F.report.job]||[]).includes(job.id));
+    if(relatedReports.some(r=>r.fields[F.report.done]||Number(r.fields[F.report.hours])>0||limit(r.fields[F.report.material])||limit(r.fields[F.report.notes])))throw failure(409,'Hay ejecución o un parte registrado. Revisa el trabajo antes de anular o recuperar la cita.');
+    let nextState='Cancelado',nextOutcome='Cancelado por ASSA',warnings=[];
+    if(action==='restore'){
+      const previous=[...audit].reverse().find(e=>e.kind==='agenda-status'&&e.action==='cancel'&&e.afterStatus==='Cancelado');
+      nextState=['Aceptado / Programado','Pendiente de visita'].includes(previous?.beforeStatus)?previous.beforeStatus:'Aceptado / Programado';
+      nextOutcome=previous?.beforeOutcome||'';
+      const users=assignedUsers(before.assigned);
+      if(users.length){const employees=await list('users',Object.values(F.user));const available=new Set(employees.filter(x=>x.fields[F.user.active]===true&&x.fields[F.user.role]==='tecnico').map(x=>x.fields[F.user.username]));if(users.some(x=>!available.has(x)))throw failure(409,'Algún técnico ya no está activo. Revisa su asignación antes de recuperar esta cita.');}
+      if(before.date&&before.start&&users.length)warnings=await checkSlot({date:before.date,start:before.start,end:before.end,users,exclude:job.id});
+    }
+    const entry={id,kind:'agenda-status',action,by:user.username,at:new Date().toISOString(),beforeStatus:before.status,beforeOutcome:before.outcome||'',afterStatus:nextState,afterOutcome:nextOutcome};
+    const fields={[F.job.state]:nextState,[F.job.outcome]:nextOutcome,[AUDIT_FIELD]:writeAudit([...audit,entry])};
+    await patch('jobs',job.id,fields);
+    const verified=await getOne('jobs',job.id);
+    if(verified.fields[F.job.state]!==nextState||(verified.fields[F.job.outcome]||'')!==nextOutcome||!readAudit(verified).some(e=>e.id===id))throw failure(409,'No se ha podido verificar el cambio. Actualiza antes de reintentar.');
+    return json(res,200,{ok:true,job:jobView(verified,true),warnings,notice:action==='cancel'?'Cita cancelada. Se conserva el expediente y no se ha modificado la facturación.':'Cita recuperada. Comprueba la disponibilidad y avisa al equipo si corresponde.'});
+  }
+  const agendaNoteMatch=p.match(/^\/api\/agenda-notes\/(rec[A-Za-z0-9]{14})\/state$/);
+  if(agendaNoteMatch&&method==='PATCH'){
+    reqAdmin(user);if(user.username!==ROOTUSER)throw failure(403,'Solo Samuel puede cancelar o recuperar citas libres.');
+    const b=await requestBody(req);
+    if(!['cancel','restore'].includes(b.action)||!/^[-a-f0-9]{36}$/.test(b.operationId||''))throw failure(400,'Operación de agenda no válida.');
+    const note=await getOne('freeAgenda',agendaNoteMatch[1]),before=freeAgendaView(note);
+    let audit=[];try{audit=JSON.parse(note.fields[F.freeAgenda.history]||'[]');}catch{throw failure(409,'El historial de la cita no es válido.');}
+    if(!Array.isArray(audit))throw failure(409,'El historial de la cita no es válido.');
+    if(audit.some(e=>e.id===b.operationId&&e.action===b.action))return json(res,200,{ok:true,unchanged:true,note:before});
+    if(b.expectedStatus!==before.status)throw failure(409,'La cita ha cambiado. Actualiza la agenda.');
+    if((b.action==='cancel'&&before.status!=='Activa')||(b.action==='restore'&&before.status!=='Cancelada'))throw failure(409,'La cita ya no está en ese estado.');
+    const status=b.action==='cancel'?'Cancelada':'Activa';
+    audit.push({id:b.operationId,action:b.action,by:user.username,at:new Date().toISOString(),before:before.status,after:status});
+    const raw=JSON.stringify(audit);if(raw.length>90000)throw failure(409,'El historial requiere revisión antes de continuar.');
+    await patch('freeAgenda',note.id,{[F.freeAgenda.status]:status,[F.freeAgenda.history]:raw});
+    const verified=await getOne('freeAgenda',note.id);
+    if(freeAgendaView(verified).status!==status)throw failure(409,'No se ha podido verificar la cita. Actualiza la agenda.');
+    return json(res,200,{ok:true,note:freeAgendaView(verified),notice:b.action==='cancel'?'Cita libre cancelada y archivada.':'Cita libre recuperada.'});
   }
   if(p==='/api/appointments'&&method==='POST'){
     reqAdmin(user);const b=await requestBody(req),partnerInstallation=b.billingMode==='partner';
@@ -763,9 +814,9 @@ async function staticFile(req,res,p){if(req.method!=='GET')throw failure(405,'M�
 const writingJobs=new Set();
 const server=http.createServer(async(req,res)=>{let writeKey;try{
   if(!['GET','HEAD'].includes(req.method)){
-    writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'||(req.url||'')==='/api/agenda-notes'?'agenda-and-jobs':null;
+    writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'||(req.url||'')==='/api/agenda-notes'||/^\/api\/agenda-notes\/rec[A-Za-z0-9]{14}\/state$/.test(req.url||'')?'agenda-and-jobs':null;
     if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
-  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'free-agenda-v10'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
+  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'cancel-restore-v11'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({
