@@ -236,16 +236,17 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const job=await authorizedJob(outcomeMatch[1],user);
     if(method==='GET')return json(res,200,{options:OUTCOMES,current:job.fields[F.job.outcome]||'',pending:pendingOutcomes(job).map(e=>({id:e.id,code:e.code,label:outcomeOption(e.code)?.label,reason:e.reason,by:e.by,at:e.at,state:e.state})),version:outcomeVersion(jobView(job,admin))});
     const b=await requestBody(req),option=outcomeOption(b.code),reason=limit(b.reason,1500),audit=readAudit(job),id='outcome-'+b.operationId;
+    const reviewOnly=user.role==='administrador'&&b.technicianMode===true;
     if(!option||reason.length<5||!/^[-a-f0-9]{36}$/.test(b.operationId||''))throw failure(400,'Selecciona el resultado e indica qué ocurrió (al menos cinco caracteres).');
     let event=audit.find(e=>e.id===id);
     if(event){if(event.by!==user.username||event.proof!==outcomeProof(event))throw failure(409,'No se pudo verificar esta solicitud.');if(event.state==='approved'||event.state==='requested')return json(res,200,{ok:true,pending:event.state==='requested',unchanged:true});if(event.state==='rejected')throw failure(409,'Esta solicitud fue descartada. Envía una nueva si hay información adicional.');}
     if(!event){
       if(b.expected!==outcomeVersion(jobView(job,admin)))throw failure(409,'El trabajo ha cambiado. Actualiza antes de comunicar el resultado.');
       if(pendingOutcomes(job).length)throw failure(409,'Ya hay un resultado pendiente de revisión.');
-      if(user.canManageRecords){const documents=(await list('orders',[F.order.job,F.order.pdf,F.order.state],3000)).filter(o=>(o.fields[F.order.job]||[]).includes(job.id));if(option.signature&&job.fields[I.mode]!==INSTALLATION_MODE&&!documents.some(o=>o.fields[F.order.pdf]?.length&&o.fields[F.order.state]==='Firmado / archivado'))throw failure(409,'Para marcar trabajo terminado, guarda primero la firma del cliente y su parte.');if(!option.signature&&documents.some(o=>o.fields[F.order.pdf]?.length))throw failure(409,'Hay un parte firmado. Revisa su cierre o añade una rectificación desde dirección.');}
-      event={id,kind:'outcome',code:b.code,reason,by:user.username,at:new Date().toISOString(),before:b.expected,state:user.canManageRecords?'applying':'requested'};event.proof=outcomeProof(event);audit.push(event);await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});
+      if(user.canManageRecords&&!reviewOnly){const documents=(await list('orders',[F.order.job,F.order.pdf,F.order.state],3000)).filter(o=>(o.fields[F.order.job]||[]).includes(job.id));if(option.signature&&job.fields[I.mode]!==INSTALLATION_MODE&&!documents.some(o=>o.fields[F.order.pdf]?.length&&o.fields[F.order.state]==='Firmado / archivado'))throw failure(409,'Para marcar trabajo terminado, guarda primero la firma del cliente y su parte.');if(!option.signature&&documents.some(o=>o.fields[F.order.pdf]?.length))throw failure(409,'Hay un parte firmado. Revisa su cierre o añade una rectificación desde dirección.');}
+      event={id,kind:'outcome',code:b.code,reason,by:user.username,at:new Date().toISOString(),before:b.expected,state:user.canManageRecords&&!reviewOnly?'applying':'requested'};event.proof=outcomeProof(event);audit.push(event);await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(audit)});
     }
-    if(!user.canManageRecords)return json(res,200,{ok:true,pending:true,notice:'Resultado enviado a Samuel. El trabajo y el cobro no se han cerrado automáticamente.'});
+    if(!user.canManageRecords||reviewOnly)return json(res,200,{ok:true,pending:true,notice:'Resultado enviado a Samuel. El trabajo y el cobro no se han cerrado automáticamente.'});
     return json(res,200,await applyOutcome(await getOne('jobs',job.id),event,user));
   }
   const decideOutcome=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/outcomes\/(outcome-[-a-f0-9]{36})\/decision$/);
@@ -339,7 +340,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(typeof b.date!=='string'||(b.date&&!validDate(b.date))||!Array.isArray(b.users)||b.users.some(x=>typeof x!=='string'||safeUsername(x)!==x))
       throw failure(400,'Indica una fecha válida y usuarios del equipo.');
     const employees=await list('users',Object.values(F.user));
-    const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true&&x.fields[F.user.role]==='tecnico').map(x=>x.fields[F.user.username]));
+    const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true&&x.fields[F.user.role]==='tecnico').map(x=>x.fields[F.user.username]));if(user.username===ROOTUSER)allowed.add(ROOTUSER);
     if(b.users.some(x=>!allowed.has(x)))throw failure(400,'Solo se pueden asignar técnicos activos.');
     const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);
     if(orders.some(o=>(o.fields[F.order.job]||[]).includes(job.id)&&(reviewEvent(o)?.state==='pending'||o.fields[F.order.pdf]?.length)))throw failure(409,'Hay un cierre pendiente o un parte firmado protegido.');
@@ -466,7 +467,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const existing=jobs.find(j=>j.fields[F.job.ref]===reference);
     if(existing)return json(res,200,{job:jobView(existing,true),unchanged:true});
     const employees=await list('users',Object.values(F.user));
-    const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true&&x.fields[F.user.role]==='tecnico').map(x=>x.fields[F.user.username]));
+    const allowed=new Set(employees.filter(x=>x.fields[F.user.active]===true&&x.fields[F.user.role]==='tecnico').map(x=>x.fields[F.user.username]));if(user.username===ROOTUSER)allowed.add(ROOTUSER);
     if(b.users.some(x=>!allowed.has(x)))throw failure(400,'Selecciona técnicos activos.');
     if(!b.date||!validTime(b.start))throw failure(400,'La cita nueva necesita fecha y hora de entrada.');
     const warnings=await checkSlot({date:b.date,start:b.start,end:b.end,users:b.users});
