@@ -98,6 +98,42 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
   assert.equal((await call('/agenda-notes','samuel','POST',{...b,operationId:'12345678-1234-4123-8123-123456789abb',date:'2026-02-30'})).status,400);
   assert.equal((await call('/agenda-notes','samuel','POST',{...b,operationId:'12345678-1234-4123-8123-123456789abc',end:'10:00'})).status,400);
  });
+ await t.test('Solo Samuel puede cancelar y recuperar citas libres conservando historial',async()=>{
+  const note=tables.tblKc1Tvz45Fu5J9b[0];assert.ok(note);const id=note.id;
+  const cancel={action:'cancel',operationId:'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaaa',expectedStatus:'Activa'};
+  assert.equal((await call('/agenda-notes/'+id+'/state','saul','PATCH',cancel)).status,403);
+  const r=await call('/agenda-notes/'+id+'/state','samuel','PATCH',cancel);assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.equal(note.fields['Estado agenda'],'Cancelada');assert.equal(JSON.parse(note.fields['Historial agenda']).length,1);
+  assert.equal((await call('/agenda-notes/'+id+'/state','samuel','PATCH',{...cancel,operationId:'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaaa'})).status,409);
+  const n=writes.length;assert.equal((await call('/agenda-notes/'+id+'/state','samuel','PATCH',cancel)).status,200);assert.equal(writes.length,n);
+  const restore={action:'restore',operationId:'aaaaaaa3-aaaa-4aaa-8aaa-aaaaaaaaaaaa',expectedStatus:'Cancelada'};
+  assert.equal((await call('/agenda-notes/'+id+'/state','samuel','PATCH',restore)).status,200);
+  assert.equal(note.fields['Estado agenda'],'Activa');assert.equal(JSON.parse(note.fields['Historial agenda']).length,2);
+ });
+ await t.test('Anular trabajo conserva expediente; recuperar comprueba solapes y no cambia cobros',async()=>{
+  const id='rec00000000000032',otherId='rec00000000000033';
+  const fields={'Trabajo / referencia':'PRUEBA-AGENDA','Nombre del Cliente':'Cliente inventado','Estado':'Aceptado / Programado','Resultado intervención (portal)':'','Fecha prevista':'2026-11-09','Hora inicio prevista (portal)':'09:00','Hora fin prevista (portal)':'10:00','Operarios asignados portal':'saul','Importe cobrado':200};
+  const job={id,fields};tables.tblsVLKBSafEEiUlI.push(job);
+  const cancel={action:'cancel',operationId:'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbbb',expected:{status:'Aceptado / Programado',outcome:''}};
+  assert.equal((await call('/jobs/'+id+'/agenda-state','saul','PATCH',cancel)).status,403);
+  const r=await call('/jobs/'+id+'/agenda-state','samuel','PATCH',cancel);assert.equal(r.status,200,JSON.stringify(r.data));
+  assert.equal(fields.Estado,'Cancelado');assert.equal(fields['Importe cobrado'],200);assert.equal(JSON.parse(fields['Historial dirección (portal)']).length,1);
+  const n=writes.length;assert.equal((await call('/jobs/'+id+'/agenda-state','samuel','PATCH',cancel)).status,200);assert.equal(writes.length,n);
+  const restore={action:'restore',operationId:'bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbbb',expected:{status:'Cancelado',outcome:'Cancelado por ASSA'}};
+  tables.tblsVLKBSafEEiUlI.push({id:otherId,fields:{'Nombre del Cliente':'Otro solapado','Estado':'Aceptado / Programado','Fecha prevista':'2026-11-09','Hora inicio prevista (portal)':'09:15','Hora fin prevista (portal)':'10:30','Operarios asignados portal':'saul'}});
+  assert.equal((await call('/jobs/'+id+'/agenda-state','samuel','PATCH',restore)).status,409);
+  assert.equal(fields.Estado,'Cancelado');tables.tblsVLKBSafEEiUlI.splice(tables.tblsVLKBSafEEiUlI.findIndex(x=>x.id===otherId),1);
+  const recovered=await call('/jobs/'+id+'/agenda-state','samuel','PATCH',restore);assert.equal(recovered.status,200,JSON.stringify(recovered.data));
+  assert.equal(fields.Estado,'Aceptado / Programado');assert.equal(fields['Resultado intervención (portal)'],'');assert.equal(fields['Importe cobrado'],200);
+  assert.equal(JSON.parse(fields['Historial dirección (portal)']).length,2);
+  tables.tblsVLKBSafEEiUlI.splice(tables.tblsVLKBSafEEiUlI.findIndex(x=>x.id===id),1);
+ });
+ await t.test('Un trabajo con ejecución no admite anulación rápida',async()=>{
+  const original=tables.tblsVLKBSafEEiUlI[0].fields.Estado;tables.tblsVLKBSafEEiUlI[0].fields.Estado='Aceptado / Programado';
+  const req={action:'cancel',operationId:'ccccccc1-cccc-4ccc-8ccc-cccccccccccc',expected:{status:'Aceptado / Programado',outcome:''}};
+  assert.equal((await call('/jobs/'+jid+'/agenda-state','samuel','PATCH',req)).status,409);
+  tables.tblsVLKBSafEEiUlI[0].fields.Estado=original;
+ });
  await t.test('Dirección corrige ficha y parte de Saúl en Presupuesto pendiente, con motivo y sin cerrar el trabajo',async()=>{
     const job=tables.tblsVLKBSafEEiUlI[0],report=tables.tblprtqasdBxVVsNx[0];job.fields.Estado='Presupuesto pendiente';
     assert.equal((await call('/jobs/'+jid+'/direction-edit','saul')).status,403);
