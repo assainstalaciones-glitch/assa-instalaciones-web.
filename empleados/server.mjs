@@ -20,7 +20,7 @@ import { buildReconciliationView } from './reconciliation-view.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 10000);
 const BASE = process.env.AIRTABLE_BASE_ID || 'appdHOIMfkGPduA83';
-const T = { partners:'tblXXBlGHp5UByNj4', jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx', reconciliationDocs:'tblW53PDguHrrOIs1', reconciliation:'tblMvunG5HhUA1qia' };
+const T = { partners:'tblXXBlGHp5UByNj4', jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx', reconciliationDocs:'tblW53PDguHrrOIs1', reconciliation:'tblMvunG5HhUA1qia', freeAgenda:'tblKc1Tvz45Fu5J9b' };
 const TOKEN = (process.env.AIRTABLE_TOKEN || '').trim();
 const SECRET = process.env.SESSION_SECRET || '';
 const ROOTUSER = (process.env.BOOTSTRAP_USER || '').trim().toLowerCase();
@@ -33,7 +33,8 @@ const F = {
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',actualStart:'Hora entrada real (portal)',actualEnd:'Hora salida real (portal)',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
   order:{job:'Trabajo origen',operator:'Operario',date:'Fecha instalación',time:'Hora citada',client:'Cliente',address:'Dirección',city:'Población',postal:'Código postal',phone:'Teléfono',email:'Correo electrónico',taxId:'NIF / DNI',budget:'Nº presupuesto',budgetDate:'Fecha presupuesto',previousNotes:'Observaciones previas',title:'Motivo del trabajo',detail:'Trabajos a realizar / partidas',base:'Base imponible',vat:'IVA',total:'Total IVA incluido',payment:'Forma de pago',state:'Estado parte',pdf:'Parte firmado',number:'Número de orden',internal:'Notas internas'},
-  visit:{title:'Visita / servicio solicitado',job:'Trabajo existente',client:'Cliente existente',contact:'Contacto por identificar',service:'Servicio',address:'Dirección de la visita',measures:'Mediciones',material:'Materiales y equipos',workers:'Operarios estimados',hours:'Horas estimadas por operario',access:'Incidencias y acceso',photos:'Fotos',notes:'Notas',next:'Siguiente paso',date:'Fecha visita',tech:'Técnico de la visita'}
+  visit:{title:'Visita / servicio solicitado',job:'Trabajo existente',client:'Cliente existente',contact:'Contacto por identificar',service:'Servicio',address:'Dirección de la visita',measures:'Mediciones',material:'Materiales y equipos',workers:'Operarios estimados',hours:'Horas estimadas por operario',access:'Incidencias y acceso',photos:'Fotos',notes:'Notas',next:'Siguiente paso',date:'Fecha visita',tech:'Técnico de la visita'},
+ freeAgenda:{title:'Título',date:'Fecha',start:'Hora inicio',end:'Hora fin',kind:'Tipo',location:'Lugar',notes:'Observaciones',createdBy:'Creado por',operation:'Operación ID'}
 };
 const FIELD_PHOTOS = { reports:'fldi3uQwhsfp7anwe', visits:'fldp141UFEZVquqTN' };
 const MIME = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml'};
@@ -76,6 +77,7 @@ function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failu
 function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
 async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
 function signedPendingClosure(order,jobId){return (order.fields[F.order.job]||[]).includes(jobId)&&order.fields[F.order.state]==='Firmado / archivado'&&!!order.fields[F.order.pdf]?.length&&reviewEvent(order)?.state==='pending';}
+function freeAgendaView(record){const f=record.fields;return {id:record.id,title:f[F.freeAgenda.title]||'',date:f[F.freeAgenda.date]||'',start:f[F.freeAgenda.start]||'',end:f[F.freeAgenda.end]||'',kind:f[F.freeAgenda.kind]||'Cita libre',location:f[F.freeAgenda.location]||'',notes:f[F.freeAgenda.notes]||''};}
 function jobView(record,admin){const f=record.fields;const data={partnerInstallation:f[I.mode]===INSTALLATION_MODE,installationUnits:f[I.units]??null,executedOn:f[I.executedOn]||'',...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:(f[I.mode]===INSTALLATION_MODE&&f[REL_FIELDS.partnerName])||f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
 async function otJobData(job,order){
   const j=job.fields||{},o=order?.fields||{};
@@ -377,6 +379,23 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   if(p==='/api/clients'&&method==='GET'){
     reqAdmin(user);const clients=await list('clients',Object.values(F.client),3000);
     return json(res,200,{clients:clients.map(c=>({id:c.id,name:c.fields[F.client.name]||'',phone:c.fields[F.client.phone]||'',address:c.fields[F.client.address]||''}))});
+  }
+  if(p==='/api/agenda-notes'&&method==='GET'){
+    reqAdmin(user);const notes=await list('freeAgenda',Object.values(F.freeAgenda),3000);
+    return json(res,200,{notes:notes.map(freeAgendaView).sort((a,b)=>a.date.localeCompare(b.date)||(a.start||'99:99').localeCompare(b.start||'99:99'))});
+  }
+  if(p==='/api/agenda-notes'&&method==='POST'){
+    reqAdmin(user);const b=await requestBody(req),title=limit(b.title,160),date=limit(b.date,10),start=limit(b.start,5),end=limit(b.end,5);
+    const allowed=['Cita libre','Visita informal','Reunión','Recordatorio'];
+    if(!/^[a-f0-9-]{36}$/.test(b.operationId||'')||!title||!validDate(date)||!allowed.includes(b.kind||'Cita libre'))throw failure(400,'Indica un título, una fecha válida y un tipo de cita.');
+    if((start&&!validTime(start))||(end&&(!start||!validTime(end)||end<=start)))throw failure(400,'Revisa la hora de inicio y fin de la cita.');
+    const existing=(await list('freeAgenda',Object.values(F.freeAgenda),3000)).find(n=>n.fields[F.freeAgenda.operation]===b.operationId);
+    if(existing)return json(res,200,{note:freeAgendaView(existing),unchanged:true});
+    const fields={[F.freeAgenda.title]:title,[F.freeAgenda.date]:date,[F.freeAgenda.kind]:b.kind||'Cita libre',[F.freeAgenda.createdBy]:user.username,[F.freeAgenda.operation]:b.operationId};
+    if(start)fields[F.freeAgenda.start]=start;if(end)fields[F.freeAgenda.end]=end;
+    if(limit(b.location,220))fields[F.freeAgenda.location]=limit(b.location,220);if(limit(b.notes,2000))fields[F.freeAgenda.notes]=limit(b.notes,2000);
+    const saved=await create('freeAgenda',fields);
+    return json(res,201,{note:freeAgendaView(saved),notice:'Anotación guardada en tu agenda. No se ha creado un cliente ni una orden de trabajo.'});
   }
   if(p==='/api/appointments'&&method==='POST'){
     reqAdmin(user);const b=await requestBody(req),partnerInstallation=b.billingMode==='partner';
@@ -744,9 +763,9 @@ async function staticFile(req,res,p){if(req.method!=='GET')throw failure(405,'M�
 const writingJobs=new Set();
 const server=http.createServer(async(req,res)=>{let writeKey;try{
   if(!['GET','HEAD'].includes(req.method)){
-    writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'?'agenda-and-jobs':null;
+    writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'||(req.url||'')==='/api/agenda-notes'?'agenda-and-jobs':null;
     if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
-  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'other-partner-pending-v9'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
+  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'free-agenda-v10'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({
