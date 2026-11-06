@@ -15,8 +15,10 @@ test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>
   const ui=context.ui,app=node('#app');
   const job={id:'rec00000000000001',client:'Cliente <prueba>',reference:'Trabajo',status:'En progreso',assigned:'saul',address:'Calle Mayor, Cambrils',phone:'600123456',date:'2026-11-05'};
   ui.state.me={username:'samuel',role:'administrador',name:'Samuel',canManageRecords:true};ui.state.jobs=[job];ui.state.employees=[{username:'saul',active:true,role:'tecnico'}];ui.state.agendaDate=job.date;ui.state.agendaMonth=job.date.slice(0,7);
-  ui.renderAgenda();assert.match(app.innerHTML,/Agenda técnica/);assert.match(app.innerHTML,/Cliente &lt;prueba&gt;/);assert.match(app.innerHTML,/tel:600123456/);assert.match(app.innerHTML,/google.com\/maps/);assert.match(app.innerHTML,/data-nav="dashboard"/);
-  assert.equal((app.innerHTML.match(/data-calendar-date=/g)||[]).length,42);assert.match(app.innerHTML,/Hora pendiente/);assert.match(app.innerHTML,/Añadir instalación/);
+  ui.renderAgenda();assert.match(app.innerHTML,/Agenda ASSA/);assert.match(app.innerHTML,/Cliente &lt;prueba&gt;/);assert.match(app.innerHTML,/tel:600123456/);assert.match(app.innerHTML,/google.com\/maps/);assert.match(app.innerHTML,/data-nav="dashboard"/);
+  assert.equal((app.innerHTML.match(/data-calendar-date=/g)||[]).length,42);assert.match(app.innerHTML,/Hora pendiente/);assert.match(app.innerHTML,/Añadir a la agenda/);
+  ui.state.agendaNotes=[{id:'rec00000000000007',title:'Reunión proveedor',kind:'Reunión',date:'2026-11-05',start:'',end:'',location:'Oficina',notes:'Revisar catálogo'}];ui.state.newAppointment=true;ui.state.newAppointmentMode='free';
+  ui.renderAgenda();assert.match(app.innerHTML,/Reunión proveedor/);assert.match(app.innerHTML,/freeAppointmentForm/);assert.doesNotMatch(app.innerHTML,/id="appointmentClient"/);ui.state.newAppointment=false;
   ui.state.dashboard={};ui.state.closures=[{id:'rec00000000000003',job,event:{submittedBy:'saul'},signed:true}];ui.state.canApprove=true;
   ui.renderDashboard();assert.match(app.innerHTML,/Cierres pendientes de Samuel/);assert.match(app.innerHTML,/data-approve-job=/);
   ui.state.job=job;ui.renderWork();assert.match(app.innerHTML,/scheduleDate/);assert.match(app.innerHTML,/Parte de ejecución/);assert.match(app.innerHTML,/Fotografías del trabajo/);
