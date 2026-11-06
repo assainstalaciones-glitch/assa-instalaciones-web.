@@ -94,3 +94,15 @@
 #calendarDay,#appointmentForm{scroll-margin-top:85px}
 [hidden]{display:none!important}
 @media(max-width:600px){.calendar-panel{padding:12px}.calendar-grid{gap:3px}.calendar-day{min-height:90px;padding:6px 3px;border-radius:6px}.calendar-day-number{font-size:12px}.calendar-event{font-size:9px}.calendar-count{font-size:8px}.calendar-toolbar{gap:8px}.calendar-toolbar h2{font-size:18px}.calendar-appointment{grid-template-columns:1fr;gap:0}.calendar-time{font-size:16px}}
+
+
+/* Compact daily workflow and explicit recovery state. */
+.work-section>summary,.panel>summary{cursor:pointer;font-weight:750;font-size:18px;line-height:1.5;list-style-position:inside}
+.work-section[open]>summary,.panel[open]>summary{margin-bottom:20px}
+.draft-status{padding:12px 14px;margin:12px 0 18px;border-radius:9px;background:#edf6f2;color:#155d4b;font-size:13px;line-height:1.5}
+.more-nav{position:relative;min-width:50px;color:var(--muted);font-size:10px;font-weight:750;text-align:center}
+.more-nav>summary{list-style:none;display:grid;gap:2px;cursor:pointer;padding:3px 7px}
+.more-nav>div{position:absolute;right:0;bottom:58px;min-width:170px;background:white;border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:8px}
+.bottom-nav .more-nav>div button{display:block;text-align:left;width:100%;padding:14px;font-size:13px}
+
+.signature-summary{white-space:pre-wrap;overflow-wrap:anywhere}

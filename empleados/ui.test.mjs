@@ -1,3 +1,5 @@
+import * as recovery from './public/recovery.js';
+import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -9,7 +11,7 @@ import * as relationships from './public/relationships.js';
 import {fifteenDayRange} from './public/partner-installations.js';
 test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>{
   const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',addEventListener(){},querySelector:x=>node(x),querySelectorAll:()=>[],getContext:()=>({fillRect(){}})});return nodes.get(id);};
-  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,...calendar,...outcomes,...relationships,changedJobFields,fifteenDayRange});
+  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},FormData:class {entries(){return [][Symbol.iterator]();}},...recovery,...calendar,...outcomes,...relationships,changedJobFields,fifteenDayRange});
   const code=readFileSync(new URL('./public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/init\(\);\s*$/,'');
   vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={state,renderAgenda,renderDashboard,renderWork,renderSign,renderDirectionEdit};",context);
   const ui=context.ui,app=node('#app');
@@ -35,3 +37,4 @@ test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>
   ui.state.me={username:'saul',role:'tecnico'};ui.renderAgenda();assert.doesNotMatch(app.innerHTML,/data-nav="dashboard"/);assert.doesNotMatch(app.innerHTML,/agendaTech/);
   ui.renderWork();assert.doesNotMatch(app.innerHTML,/saveAssign/);assert.match(app.innerHTML,/Firmar y enviar a revisión/);
 });
+

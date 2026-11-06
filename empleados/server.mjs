@@ -1,4 +1,6 @@
+import { economicsView } from './economics.mjs';
 import http from 'node:http';
+import { reportVersion, visitMarker, stripVisitMarker, writeKeys } from './reliability.mjs';
 import { INSTALLATION_MODE, INSTALLATION_FIELDS as I } from './public/partner-installations.js';
 import { partnerSummary } from './partner-summary.mjs';
 import { REL_FIELDS, relationshipView, relationshipVersion } from './public/relationships.js';
@@ -78,7 +80,7 @@ function assigned(job,user){if(user.role==='administrador')return true;const nam
 async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
 function signedPendingClosure(order,jobId){return (order.fields[F.order.job]||[]).includes(jobId)&&order.fields[F.order.state]==='Firmado / archivado'&&!!order.fields[F.order.pdf]?.length&&reviewEvent(order)?.state==='pending';}
 function freeAgendaView(record){const f=record.fields;return {id:record.id,title:f[F.freeAgenda.title]||'',date:f[F.freeAgenda.date]||'',start:f[F.freeAgenda.start]||'',end:f[F.freeAgenda.end]||'',kind:f[F.freeAgenda.kind]||'Cita libre',location:f[F.freeAgenda.location]||'',notes:f[F.freeAgenda.notes]||'',status:f[F.freeAgenda.status]||'Activa'};}
-function jobView(record,admin){const f=record.fields;const data={partnerInstallation:f[I.mode]===INSTALLATION_MODE,installationUnits:f[I.units]??null,executedOn:f[I.executedOn]||'',...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:(f[I.mode]===INSTALLATION_MODE&&f[REL_FIELDS.partnerName])||f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin)data.clientId=(f[F.job.client]||[])[0]||'';return data;}
+function jobView(record,admin){const f=record.fields;const data={partnerInstallation:f[I.mode]===INSTALLATION_MODE,installationUnits:f[I.units]??null,executedOn:f[I.executedOn]||'',...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:(f[I.mode]===INSTALLATION_MODE&&f[REL_FIELDS.partnerName])||f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin){data.clientId=(f[F.job.client]||[])[0]||'';data.economics=economicsView(f);}return data;}
 async function otJobData(job,order){
   const j=job.fields||{},o=order?.fields||{};
   let cl={};
@@ -128,12 +130,16 @@ async function otJobData(job,order){
     payment:o[F.order.payment]||''
   };
 }
-function reportView(r){const f=r.fields;return {id:r.id,user:f[F.report.user]||'',hours:f[F.report.hours]??'',actualStart:f[F.report.actualStart]||'',actualEnd:f[F.report.actualEnd]||'',material:f[F.report.material]||'',notes:f[F.report.notes]||'',date:f[F.report.date]||'',done:!!f[F.report.done],photos:(f[F.report.photos]||[]).map(x=>({id:x.id,filename:x.filename,url:x.thumbnails?.large?.url||x.url}))};}
+function reportView(r){const f=r.fields;return {id:r.id,version:reportVersion(r),user:f[F.report.user]||'',hours:f[F.report.hours]??'',actualStart:f[F.report.actualStart]||'',actualEnd:f[F.report.actualEnd]||'',material:f[F.report.material]||'',notes:f[F.report.notes]||'',date:f[F.report.date]||'',done:!!f[F.report.done],photos:(f[F.report.photos]||[]).map(x=>({id:x.id,filename:x.filename,url:x.thumbnails?.large?.url||x.url}))};}
 function dateMadrid(){const x=new Intl.DateTimeFormat('en-US',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(x.map(p=>[p.type,p.value]));return `${v.year}-${v.month}-${v.day}`;}
 async function attach(table,recordId,fieldId,photo){
   if(!photo || !/^image\/(jpeg|png|webp)$/.test(photo.contentType||'')||!/^[-\w. ]{1,80}$/.test(photo.filename||''))throw failure(400,'Solo se admiten fotos JPG, PNG o WebP.');
   const file=photo.file||'';if(!/^[\w+/=]+$/.test(file)||Buffer.byteLength(file,'base64')>4.8*1024*1024)throw failure(413,'La foto supera el límite de 4,8 MB.');
-  const response=await fetch(`https://content.airtable.com/v0/${BASE}/${recordId}/${fieldId}/uploadAttachment`,{method:'POST',headers:{Authorization:`Bearer ${TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({file,filename:photo.filename,contentType:photo.contentType})});
+  const extension={ 'image/jpeg':'jpg','image/png':'png','image/webp':'webp' }[photo.contentType];
+  const filename='assa-'+createHash('sha256').update(Buffer.from(file,'base64')).digest('hex')+'.'+extension;
+  const current=await getOne(table,recordId),photos=current.fields[table==='reports'?F.report.photos:F.visit.photos]||[];
+  if(photos.some(p=>p.filename===filename))return {ok:true,unchanged:true};
+  const response=await fetch(`https://content.airtable.com/v0/${BASE}/${recordId}/${fieldId}/uploadAttachment`,{method:'POST',headers:{Authorization:`Bearer ${TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({file,filename,contentType:photo.contentType})});
   if(!response.ok){console.error('Airtable upload',response.status);throw failure(502,'No se pudo subir la foto.');}return response.json();
 }
 function loginThrottle(ip){const now=Date.now();const item=attempts.get(ip)||{count:0,until:now+15*60000};if(item.until<now){item.count=0;item.until=now+15*60000;}item.count++;attempts.set(ip,item);return item.count<=10;}
@@ -720,7 +726,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const signature=Buffer.from(imageMatch[1],'base64');
     if(signature.length<150||signature.length>2000000||signature.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw failure(400,'No se ha podido leer la firma.');
     const allReports=await list('reports',Object.values(F.report),1000);
-    const candidates=allReports.filter(r=>(r.fields[F.report.job]||[]).includes(job.id));
+    const candidates=allReports.filter(r=>(r.fields[F.report.job]||[]).includes(job.id)).sort((a,b)=>String(b.fields[F.report.date]||'').localeCompare(String(a.fields[F.report.date]||'')));
     const selected=candidates.find(r=>r.fields[F.report.user]===user.username)||
       (admin?candidates.find(r=>!r.fields[F.report.done]):null);
     if(!selected||(!selected.fields[F.report.material]&&!selected.fields[F.report.notes]))throw failure(400,'Guarda antes el parte con materiales u observaciones.');
@@ -790,14 +796,31 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       const job=await getOne('jobs',reportsMatch[1]);if(!ACTIVE.has(job.fields[F.job.state]))throw failure(409,'El trabajo no está abierto.');
       const orders=await list('orders',[F.order.job,F.order.pdf],3000);
       if(orders.some(o=>(o.fields[F.order.job]||[]).includes(job.id)&&o.fields[F.order.pdf]?.length))throw failure(409,'El trabajo tiene un parte firmado; la ejecución está bloqueada.');
-      const b=await requestBody(req);const hours=b.hours===''||b.hours===null?null:Number(b.hours);if(hours!==null&&(!Number.isFinite(hours)||hours<0||hours>24))throw failure(400,'Horas inválidas.');const ref=`${reportsMatch[1]}-${user.username}`;const fields={[F.report.ref]:ref,[F.report.job]:[reportsMatch[1]],[F.report.user]:user.username,[F.report.material]:limit(b.material,10000),[F.report.notes]:limit(b.notes,10000),[F.report.date]:/^\d{4}-\d{2}-\d{2}$/.test(b.date||'')?b.date:dateMadrid()};if(hours!==null)fields[F.report.hours]=hours;
-      const prev=related.find(r=>r.fields[F.report.user]===user.username);const actualStart=Object.hasOwn(b,'actualStart')?b.actualStart:prev?.fields[F.report.actualStart]||'',actualEnd=Object.hasOwn(b,'actualEnd')?b.actualEnd:prev?.fields[F.report.actualEnd]||'';if((actualStart&&!validTime(actualStart))||(actualEnd&&(!validTime(actualEnd)||!validTime(actualStart)||actualEnd<=actualStart)))throw failure(400,'Indica entrada y salida reales del mismo día, con salida posterior a la entrada.');if(Object.hasOwn(b,'actualStart'))fields[F.report.actualStart]=actualStart||null;if(Object.hasOwn(b,'actualEnd'))fields[F.report.actualEnd]=actualEnd||null;if(prev?.fields[F.report.done])throw failure(409,'El parte ya está cerrado.');const result=prev?await patch('reports',prev.id,fields):await create('reports',fields);return json(res,200,{report:reportView(result)});}
+      const b=await requestBody(req);const hours=b.hours===''||b.hours===null?null:Number(b.hours);if(hours!==null&&(!Number.isFinite(hours)||hours<0||hours>24))throw failure(400,'Horas inválidas.');const day=b.date||dateMadrid();if(!validDate(day))throw failure(400,'Indica una fecha de jornada válida.');const ref=`${reportsMatch[1]}-${user.username}-${day}`;const fields={[F.report.ref]:ref,[F.report.job]:[reportsMatch[1]],[F.report.user]:user.username,[F.report.material]:limit(b.material,10000),[F.report.notes]:limit(b.notes,10000),[F.report.date]:day};if(hours!==null)fields[F.report.hours]=hours;
+      const matches=related.filter(r=>r.fields[F.report.user]===user.username&&r.fields[F.report.date]===day);
+      if(matches.length>1)throw failure(409,'Hay varios partes de esta jornada. Dirección debe revisarlos antes de editar.');
+      const prev=matches[0];
+      if(b.reportId&&b.reportId!==prev?.id)throw failure(409,'La jornada ha cambiado. Actualiza antes de guardar.');
+      if(b.expected&&!(b.expected==='new'&&!prev)&&b.expected!==reportVersion(prev)){
+        const same=prev&&Object.entries(fields).every(([key,value])=>key===F.report.ref||JSON.stringify(prev.fields[key]??'')===JSON.stringify(value))&&
+          (!Object.hasOwn(b,'actualStart')||(prev.fields[F.report.actualStart]||'')===b.actualStart)&&(!Object.hasOwn(b,'actualEnd')||(prev.fields[F.report.actualEnd]||'')===b.actualEnd);
+        if(same)return json(res,200,{report:reportView(prev),recovered:true});
+        throw failure(409,'El parte ha cambiado desde que lo abriste. Conservamos tu borrador; revisa el registro antes de sobrescribir.');
+      }
+      const actualStart=Object.hasOwn(b,'actualStart')?b.actualStart:prev?.fields[F.report.actualStart]||'',actualEnd=Object.hasOwn(b,'actualEnd')?b.actualEnd:prev?.fields[F.report.actualEnd]||'';if((actualStart&&!validTime(actualStart))||(actualEnd&&(!validTime(actualEnd)||!validTime(actualStart)||actualEnd<=actualStart)))throw failure(400,'Indica entrada y salida reales del mismo día, con salida posterior a la entrada.');if(Object.hasOwn(b,'actualStart'))fields[F.report.actualStart]=actualStart||null;if(Object.hasOwn(b,'actualEnd'))fields[F.report.actualEnd]=actualEnd||null;if(prev?.fields[F.report.done])throw failure(409,'El parte ya está cerrado.');const result=prev?await patch('reports',prev.id,fields):await create('reports',fields);return json(res,200,{report:reportView(result)});}
   }
   const finishMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/finish$/);
   if(finishMatch&&method==='POST')throw failure(409,'Para finalizar, usa Firmar y finalizar trabajo. El cliente debe firmar el parte.');
   if(p==='/api/visits'&&method==='POST'){const b=await requestBody(req);if(!limit(b.title)||!limit(b.address))throw failure(400,'Indica el servicio solicitado y la dirección.');
+    let marker='';
+    if(b.operationId){
+      if(!/^[a-f0-9-]{36}$/.test(b.operationId))throw failure(400,'Identificador de visita inválido.');
+      marker=visitMarker(user.username,b.operationId);
+      const previous=(await list('visits',[F.visit.notes,F.visit.tech],3000)).find(r=>r.fields[F.visit.tech]===user.username&&String(r.fields[F.visit.notes]||'').split('\n').includes(marker));
+      if(previous)return json(res,200,{id:previous.id,recovered:true});
+    }
     let job=null; if(b.job){job=await authorizedJob(b.job,user);}let clientId=job?(job.fields[F.job.client]||[])[0]:null;
-    const fields={[F.visit.title]:limit(b.title,200),[F.visit.contact]:limit(b.contact,200),[F.visit.address]:limit(b.address,200),[F.visit.measures]:limit(b.measures,10000),[F.visit.material]:limit(b.material,10000),[F.visit.access]:limit(b.access,10000),[F.visit.notes]:limit(b.notes,10000),[F.visit.tech]:user.username,[F.visit.date]:dateMadrid()};
+    const fields={[F.visit.title]:limit(b.title,200),[F.visit.contact]:limit(b.contact,200),[F.visit.address]:limit(b.address,200),[F.visit.measures]:limit(b.measures,10000),[F.visit.material]:limit(b.material,10000),[F.visit.access]:limit(b.access,10000),[F.visit.notes]:limit(stripVisitMarker(b.notes),10000)+(marker?'\n'+marker:''),[F.visit.tech]:user.username,[F.visit.date]:dateMadrid()};
     if(job)fields[F.visit.job]=[job.id];if(clientId)fields[F.visit.client]=[clientId];
     if(b.service&&['Fontanería','Electricidad','Gas','Calderas','Climatización','Fotovoltaica','Aerotermia','Tratamiento de agua','Otros'].includes(b.service))fields[F.visit.service]=b.service;
     if(b.next&&['Preparar presupuesto','Faltan datos','Requiere otra visita','Solo registrar visita'].includes(b.next))fields[F.visit.next]=b.next;
@@ -805,18 +828,22 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const result=await create('visits',fields);return json(res,201,{id:result.id});}
   const photo=p.match(/^\/api\/(reports|visits)\/(rec[A-Za-z0-9]{14})\/photo$/);
   if(photo&&method==='POST'){const [_,type,id]=photo;const record=await getOne(type,id);if(type==='reports'){
-      const workId=(record.fields[F.report.job]||[])[0];if(!workId)throw failure(403,'El parte no tiene trabajo asociado.');await authorizedJob(workId,user);if(!admin&&record.fields[F.report.user]!==user.username)throw failure(403,'No puedes modificar fotos de otro técnico.');if(record.fields[F.report.done])throw failure(409,'El parte ya está cerrado.');
+      const workId=(record.fields[F.report.job]||[])[0];if(!workId)throw failure(403,'El parte no tiene trabajo asociado.');const jobKey='job:'+workId;if(writingJobs.has(jobKey))throw failure(409,'El trabajo se está guardando. Reintenta la foto en un momento.');writingJobs.add(jobKey);req.portalLocks.push(jobKey);await authorizedJob(workId,user);if(!admin&&record.fields[F.report.user]!==user.username)throw failure(403,'No puedes modificar fotos de otro técnico.');if(record.fields[F.report.done])throw failure(409,'El parte ya está cerrado.');
     }else if(!admin&&record.fields[F.visit.tech]!==user.username)throw failure(403,'No puedes modificar otra visita.');
     const input=await requestBody(req);await attach(type,id,FIELD_PHOTOS[type],input);return json(res,200,{ok:true});}
   throw failure(404,'Ruta no encontrada.');
 }
 async function staticFile(req,res,p){if(req.method!=='GET')throw failure(405,'Método no permitido.');let target=p==='/'?'index.html':p.slice(1);if(target.includes('..')||target.includes('\\')||target.startsWith('.'))throw failure(404,'No existe.');target=normalize(target);const absolute=join(ROOT,'public',target);const check=await stat(absolute).catch(()=>null);if(!check?.isFile())throw failure(404,'No existe.');const data=await readFile(absolute);res.writeHead(200,{'Content-Type':MIME[extname(absolute)]||'application/octet-stream','Cache-Control':target==='index.html'?'no-store':'public, max-age=900','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'strict-origin-when-cross-origin','Content-Security-Policy':"default-src 'self'; img-src 'self' data: https://*.airtableusercontent.com; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"});res.end(data);}
 const writingJobs=new Set();
-const server=http.createServer(async(req,res)=>{let writeKey;try{
-  if(!['GET','HEAD'].includes(req.method)){
-    writeKey=(req.url||'').startsWith('/api/jobs/')||(req.url||'')==='/api/appointments'||(req.url||'')==='/api/agenda-notes'||/^\/api\/agenda-notes\/rec[A-Za-z0-9]{14}\/state$/.test(req.url||'')?'agenda-and-jobs':null;
-    if(writeKey){if(writingJobs.has(writeKey)){writeKey=null;throw failure(409,'Este trabajo se está guardando. Actualiza antes de reintentar.');}writingJobs.add(writeKey);}
-  }const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'cancel-restore-v11'});if(url.pathname.startsWith('/api/'))return await api(req,res,url);return await staticFile(req,res,url.pathname);}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{if(writeKey)writingJobs.delete(writeKey);}});
+const server=http.createServer(async(req,res)=>{let held=[];try{
+  const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);
+  const keys=writeKeys(url.pathname,req.method);
+  if(keys.some(k=>writingJobs.has(k)))throw failure(409,'Este registro se está guardando. Espera un momento antes de reintentar.');
+  held=keys;req.portalLocks=held;for(const key of held)writingJobs.add(key);
+  if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'daily-recovery-v12'});
+  if(url.pathname.startsWith('/api/'))return await api(req,res,url);
+  return await staticFile(req,res,url.pathname);
+}catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{for(const key of held)writingJobs.delete(key);}});
 if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen(PORT,'0.0.0.0',()=>{
   console.log(`ASSA Portal listening on :${PORT}; configured: ${!!ready}`);
   if(!ready) console.log('ASSA setup checks (no secrets):',JSON.stringify({
@@ -827,3 +854,4 @@ if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen
   }));
 });
 export { passwordHash,comparePassword,sign,verify,server };
+

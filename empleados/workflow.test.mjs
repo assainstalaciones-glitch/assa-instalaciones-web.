@@ -36,11 +36,11 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
       o.fields['Parte firmado']=[{url:'https://example.invalid/test.pdf'}];writes.push({upload:true});return Response.json({});
     }
     const [,v,base,table,id]=url.pathname.split('/');assert.equal(base,'appdHOIMfkGPduA83');
-    const records=tables[table]||[];
+    const records=tables[table]||(tables[table]=[]);
     if(method==='GET')return Response.json(id?records.find(r=>r.id===id):{records});
     writes.push({table,id,method,fields:body.fields});
     if(method==='PATCH'){const r=records.find(r=>r.id===id);assert.ok(r);Object.assign(r.fields,body.fields);return Response.json(r);}
-    assert.ok(['tblvZgkNh2cX1bTNx','tblsVLKBSafEEiUlI','tblKc1Tvz45Fu5J9b'].includes(table));const r={id:table==='tblvZgkNh2cX1bTNx'?oid:'rec'+String(records.length+100).padStart(14,'0'),fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
+    assert.ok(['tblvZgkNh2cX1bTNx','tblsVLKBSafEEiUlI','tblKc1Tvz45Fu5J9b','tblprtqasdBxVVsNx','tblqkKyk1HvE3rFKw'].includes(table));const r={id:table==='tblvZgkNh2cX1bTNx'?oid:'rec'+String(records.length+100).padStart(14,'0'),fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
   };
   t.after(()=>{globalThis.fetch=originalFetch;});
   const call=async(path,user='saul',method='GET',data)=>{
@@ -310,4 +310,5 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=true;tables.tblZURy4PjvmL1Kr0[0].fields.Rol='desconocido';assert.equal((await call('/me')).status,401);
   });
 });
+
 

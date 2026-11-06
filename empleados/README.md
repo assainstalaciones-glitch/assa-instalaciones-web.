@@ -1,5 +1,17 @@
 # ASSA · Portal de empleados
 
+## Simplificación y guardado recuperable — 06/11/2026
+
+- Inicio **Hoy** con trabajos del día, próximos trabajos, contactos y planificación pendiente. En móvil, las pantallas secundarias están en **Más**.
+- Ficha de trabajo con planificación, relaciones, OT, jornadas y costes en secciones desplegables. Los costes son lectura de Airtable y solo aparecen para administración; no se imputan ni se validan importes desde esta pantalla.
+- Las pruebas identificadas se excluyen de Agenda, Hoy y listados habituales sin borrar registros.
+- El técnico selecciona una jornada: se conserva un registro por usuario, trabajo y fecha. Los registros anteriores no se migran ni sobrescriben por introducir otro día. Las horas-persona y observaciones de todas las jornadas se incluyen en el resumen previo a la firma. Partes cerrados y PDFs firmados conservan su protección.
+- Los borradores de partes y visitas, con fotos comprimidas pendientes, se conservan en IndexedDB del dispositivo por usuario durante un máximo de 24 horas para su recuperación. Se eliminan al completar el guardado o cerrar sesión explícitamente. No se guardan contraseñas ni firmas en los borradores. Si el navegador no admite el almacenamiento, se advierte y el guardado en línea sigue disponible. La carga inicial de la app requiere conexión: no es una app totalmente offline.
+- Una visita conserva su ID de operación en un marcador de la tabla existente, sin crear campos nuevos. Los reintentos de su formulario reutilizan el registro. Si fallan fotos, se bloquean los datos ya enviados y se reintentan las fotos restantes.
+- Las fotos se identifican por una huella de contenido en el nombre del adjunto, evitando repetirlas si la respuesta se perdió. El bloqueo de edición es por trabajo; las operaciones que afectan a disponibilidad conservan un bloqueo compartido de planificación. Estos bloqueos son de la instancia actual, no una transacción distribuida con agentes externos.
+- Ante un conflicto de edición, se conserva el borrador: revisar lo guardado o descartar el borrador local antes de volver a editar. Descartar un borrador no borra registros de Airtable.
+- No se activan integraciones nuevas con Calendar/Drive, ni se cambia el plan de Render. El consumo de stock por líneas y la imputación económica siguen requiriendo diseño y validación separados.
+
 Aplicación independiente de ChatGPT y separada de la web pública.
 Desplegar desde la rama `portal-empleados-v1` como Web Service Node, comando de inicio `cd empleados && npm start`, comando de construcción `cd empleados && npm install`.
 
@@ -63,3 +75,4 @@ Sin AIRTABLE_TOKEN no está operativo el inicio de sesión: la API devuelve 503 
 - Al recuperar un trabajo se comprueba el solape con otros trabajos activos y que los operarios sigan habilitados. Recuperar no envía notificaciones automáticamente.
 - Las citas libres utilizan `Estado agenda` e `Historial agenda` en la tabla `AGENDA LIBRE ASSA`, con acciones de cancelación/restauración solo para la administración principal.
 - Las acciones exigen confirmación y comprobación del estado previo, conservan auditoría con usuario y fecha y no generan clientes u órdenes de trabajo. Esta agenda del portal no supone una modificación automática en Google Calendar.
+
