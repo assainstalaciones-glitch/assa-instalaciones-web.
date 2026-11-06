@@ -47,3 +47,11 @@ Sin AIRTABLE_TOKEN no está operativo el inicio de sesión: la API devuelve 503 
 - Los trabajos previos a la firma digital del Portal ASSA que estén terminados, con referencia de factura y cobro completo se mostrarán en **Cerrados y cobrados**. Una antigua OT sin PDF de firma sigue documentándose como **firma no digitalizada**, pero no se trata como una firma nueva pendiente.
 - Las fichas de CLIENTES sirven para completar nombres y domicilios visibles que falten en TRABAJOS. Si se toma una dirección del cliente, debe identificarse como domicilio de la ficha y no presumirse que es el lugar de la intervención.
 - Conservar pendientes genuinos: pagos parciales, cobros no demostrados y trabajos sin precio o referencia documental. No crear documentos fiscales ni fabricar firmas para cerrar alertas.
+
+
+## Agenda libre de administración (06/11/2026)
+- En **Agenda → Añadir a la agenda**, elegir **Cita libre / recordatorio** para registrar reuniones, contactos informales, gestiones o recordatorios sin seleccionar cliente, intermediario ni operario.
+- Solo son obligatorios el título y la fecha; hora de inicio, fin, lugar y observaciones son opcionales. Las citas libres se almacenan en la tabla independiente **AGENDA LIBRE ASSA** de Airtable.
+- Solo administración puede ver o crear estas anotaciones por el portal. No se crean registros en TRABAJOS, clientes, partes, órdenes de trabajo, facturas ni unidades de instalaciones de colaborador. No ocupan por sí mismas la disponibilidad de técnicos.
+- Para nuevas instalaciones o visitas técnicas oficiales se conserva el formulario existente seleccionando **Instalación / visita técnica**.
+- La lista y escritura de notas se exponen por `GET/POST /api/agenda-notes` con sesión de administrador y protección de reintentos mediante operación ID.
