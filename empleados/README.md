@@ -55,3 +55,11 @@ Sin AIRTABLE_TOKEN no está operativo el inicio de sesión: la API devuelve 503 
 - Solo administración puede ver o crear estas anotaciones por el portal. No se crean registros en TRABAJOS, clientes, partes, órdenes de trabajo, facturas ni unidades de instalaciones de colaborador. No ocupan por sí mismas la disponibilidad de técnicos.
 - Para nuevas instalaciones o visitas técnicas oficiales se conserva el formulario existente seleccionando **Instalación / visita técnica**.
 - La lista y escritura de notas se exponen por `GET/POST /api/agenda-notes` con sesión de administrador y protección de reintentos mediante operación ID.
+
+## Cancelar y recuperar citas de Agenda (06/11/2026)
+- Solo la cuenta principal de administración puede pulsar **Cancelar cita** o **Recuperar cita** desde la agenda. No se eliminan registros.
+- Las reservas de trabajo con estado `Cancelado` y las notas con estado `Cancelada` quedan fuera de la vista habitual. **Mostrar canceladas** permite verlas y recuperarlas. Las citas anuladas no ocupan horarios de técnicos.
+- La cancelación de trabajos sin ejecución guarda en `TRABAJOS` el estado `Cancelado`, resultado `Cancelado por ASSA` e historial de dirección; no escribe en facturas, cobros, importes ni parte firmado. Los trabajos con ejecución real o partes firmados requieren revisión desde dirección, no cancelación rápida.
+- Al recuperar un trabajo se comprueba el solape con otros trabajos activos y que los operarios sigan habilitados. Recuperar no envía notificaciones automáticamente.
+- Las citas libres utilizan `Estado agenda` e `Historial agenda` en la tabla `AGENDA LIBRE ASSA`, con acciones de cancelación/restauración solo para la administración principal.
+- Las acciones exigen confirmación y comprobación del estado previo, conservan auditoría con usuario y fecha y no generan clientes u órdenes de trabajo. Esta agenda del portal no supone una modificación automática en Google Calendar.
