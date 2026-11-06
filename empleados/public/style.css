@@ -116,3 +116,10 @@
 .work-optional>.panel{border:0;box-shadow:none;padding:8px 0 0;margin-bottom:0}
 #reportForm>div.actions>.button.primary{font-size:15px}
 @media(max-width:600px){#reportForm>div.actions{display:flex;flex-direction:column;align-items:stretch}#reportForm>div.actions>.button{width:100%}}
+
+/* Cambio sencillo entre vista Dirección e Instalador para administradores. */
+.mobile-mode-actions{display:flex;align-items:center;gap:6px}
+.mode-switch{font-weight:750;white-space:nowrap}
+.side-bottom .mode-switch{border:1px solid #ffffff40;background:#ffffff24;color:#fff}
+@media(max-width:840px){.header-mobile{gap:8px}.header-mobile .brand{font-size:14px;white-space:nowrap}.mobile-mode-actions{flex-shrink:0}.header-mobile .mode-switch{background:#fff;color:#153452;font-size:12px;padding:8px 10px}}
+@media(max-width:380px){.header-mobile{padding:9px 10px}.header-mobile .brand{font-size:12px}.header-mobile .brand-logo{width:28px;height:28px;margin-right:2px}.header-mobile .mode-switch{font-size:11px;padding:7px}}
