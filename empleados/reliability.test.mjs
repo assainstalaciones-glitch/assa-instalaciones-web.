@@ -28,7 +28,7 @@ test('Aislamiento de borradores, caducidad y exclusión de pruebas sin ocultar t
 
 test('Jornadas, reintentos, fotos y concurrencia con Airtable exclusivamente simulado',async t=>{
  process.env.AIRTABLE_TOKEN='pat-local-fixture';process.env.SESSION_SECRET='fixture-'.repeat(7);process.env.BOOTSTRAP_USER='samuel';process.env.BOOTSTRAP_PASSWORD_HASH='scrypt$test$'+'0'.repeat(128);
- const {server,sign}=await import('./server.mjs');
+ const {server,sign,credentialVersion}=await import('./server.mjs');
  const jid='rec11111111111111',other='rec22222222222222';
  const jobs=[jid,other].map(id=>({id,fields:{Estado:'En progreso','Operarios asignados portal':'saul, alex'}}));
  const tables={tblsVLKBSafEEiUlI:jobs,tblprtqasdBxVVsNx:[],tblqkKyk1HvE3rFKw:[],tblvZgkNh2cX1bTNx:[],tblZURy4PjvmL1Kr0:['saul','alex'].map((name,i)=>({id:'rec'+String(i+5).padStart(14,'0'),fields:{Usuario:name,Rol:'tecnico',Activo:true}}))};
@@ -49,7 +49,7 @@ test('Jornadas, reintentos, fotos y concurrencia con Airtable exclusivamente sim
  };
  const call=async(path,user='saul',method='GET',data)=>{
    const req=Readable.from(data?[Buffer.from(JSON.stringify(data))]:[]);req.url='/api'+path;req.method=method;
-   req.headers={host:'localhost',cookie:'assa_session='+sign({user,role:'tecnico',exp:Date.now()+60000})};req.socket={remoteAddress:'fixture'};
+   req.headers={host:'localhost',cookie:'assa_session='+sign({user,credential:credentialVersion(''),role:'tecnico',exp:Date.now()+60000})};req.socket={remoteAddress:'fixture'};
    let status,result;await server.listeners('request')[0](req,{setHeader(){},writeHead(code){status=code;},end(body){result=JSON.parse(String(body));}});return {status,data:result};
  };
  const body=(date,hours)=>({date,hours,notes:'Trabajo documentado',material:'Canaleta',expected:'new'});

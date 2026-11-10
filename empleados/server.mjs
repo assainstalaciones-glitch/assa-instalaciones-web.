@@ -69,10 +69,10 @@ async function create(table,fields){return airtable(table,'POST','',{fields,type
 async function patch(table,id,fields){return airtable(table,'PATCH',`/${id}`,{fields,typecast:false});}
 async function requestBody(req){let chunks=[],bytes=0;for await(const c of req){bytes+=c.length;if(bytes>7*1024*1024)throw failure(413,'El archivo o formulario es demasiado grande.');chunks.push(c);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch{throw failure(400,'Datos no válidos.');}}
 function originCheck(req){const origin=req.headers.origin;if(origin && new URL(origin).host!==req.headers.host)throw failure(403,'Solicitud no autorizada.');const site=req.headers['sec-fetch-site'];if(site && site==='cross-site')throw failure(403,'Solicitud externa bloqueada.');}
-async function identify(req){const raw=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('assa_session='))?.split('=')[1]||'';const claim=verify(raw);if(!claim)return null;
+async function identify(req){const raw=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('assa_session='))?.split('=')[1]||'';const claim=verify(raw);if(!claim||claim.purpose)return null;
   if(claim.user===ROOTUSER && ROOTUSER && claim.role==='administrador')return {username:ROOTUSER,name:'Administración ASSA',role:'administrador'};
   const records=await list('users',Object.values(F.user));const user=records.find(x=>x.fields[F.user.username]===claim.user && x.fields[F.user.active]===true);
-  return user&&['administrador','tecnico'].includes(user.fields[F.user.role])?{username:claim.user,name:user.fields[F.user.name]||claim.user,role:user.fields[F.user.role]||'tecnico'}:null;
+  return user&&claim.credential===credentialVersion(user.fields[F.user.hash])&&['administrador','tecnico'].includes(user.fields[F.user.role])?{username:claim.user,name:user.fields[F.user.name]||claim.user,role:user.fields[F.user.role]||'tecnico'}:null;
 }
 function reqAuth(user){if(!user)throw failure(401,'Accede con tu usuario y contraseña.');}
 function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failure(403,'Solo administración puede realizar esta acción.');}
@@ -197,16 +197,44 @@ async function applyOutcome(job,event,user){
   const verified=await getOne('jobs',job.id);if(!readAudit(verified).some(e=>e.id===event.id&&e.state==='approved'))throw failure(409,'No se pudo verificar el historial del resultado.');
   return {ok:true,notice:option.closed?'Caso cerrado operativamente. El cobro no se ha modificado.':'Resultado guardado; el caso sigue pendiente de la siguiente acción. El cobro no se ha modificado.'};
 }
+
+const resettingAccounts=new Set();
+function credentialVersion(hash){return createHmac('sha256',SECRET).update(String(hash||'')).digest('hex');}
+function resetClaim(token){const claim=verify(String(token||''));return claim?.purpose==='password-reset'&&validId(claim.record)?claim:null;}
+async function resetPassword(input){
+  const claim=resetClaim(input.token);
+  if(!claim)throw failure(400,'Enlace inválido o caducado. Pide otro a administración.');
+  const pass=String(input.password||'');
+  if(pass.length<12||pass.length>128)throw failure(400,'La contraseña debe tener entre 12 y 128 caracteres.');
+  if(resettingAccounts.has(claim.record))throw failure(409,'Hay un cambio en curso. Espera un momento.');
+  resettingAccounts.add(claim.record);
+  try{
+    const row=await getOne('users',claim.record), f=row.fields;
+    if(f[F.user.username]!==claim.user||f[F.user.role]!=='tecnico'||f[F.user.active]!==true||credentialVersion(f[F.user.hash])!==claim.credential)throw failure(400,'Enlace inválido o utilizado. Pide otro a administración.');
+    if(comparePassword(pass,f[F.user.hash]||''))throw failure(400,'Elige una contraseña distinta de la anterior.');
+    const hash=passwordHash(pass);
+    await patch('users',row.id,{[F.user.hash]:hash});
+    const saved=await getOne('users',row.id);
+    if(saved.fields[F.user.hash]!==hash)throw failure(502,'No se pudo confirmar el cambio. Pide otro enlace a administración.');
+    return {ok:true};
+  }finally{resettingAccounts.delete(claim.record);}
+}
+
 async function api(req,res,url){const method=req.method;const p=url.pathname; if(!ready)throw failure(503,'El portal está preparado, pendiente de configurar credenciales seguras y conexión a Airtable.');
   if(method!=='GET')originCheck(req);
+  if(p==='/api/password-reset'&&method==='POST'){
+    const input=await requestBody(req);
+    if(!loginThrottle('reset:'+String(req.socket.remoteAddress||'client')))throw failure(429,'Demasiados intentos. Prueba más tarde.');
+    const result=await resetPassword(input);cookie(res,'',true);return json(res,200,result);
+  }
   if(p==='/api/login'&&method==='POST'){
-    const input=await requestBody(req);const ip=`${req.socket.remoteAddress||'client'}:${safeUsername(input.username)}`;if(!loginThrottle(ip))throw failure(429,'Demasiados intentos. Prueba más tarde.');const uname=safeUsername(input.username);const pass=String(input.password||'');let account=null;
+    const input=await requestBody(req);const ip=`${req.socket.remoteAddress||'client'}:${safeUsername(input.username)}`;if(!loginThrottle(ip))throw failure(429,'Demasiados intentos. Prueba más tarde.');const uname=safeUsername(input.username);const pass=String(input.password||'');let account=null,credential;
     if(uname===ROOTUSER&&comparePassword(pass,ROOTHASH))account={username:ROOTUSER,role:'administrador',name:'Administración ASSA'};
-    if(!account){const users=await list('users',Object.values(F.user));const a=users.find(x=>x.fields[F.user.username]===uname&&x.fields[F.user.active]===true);if(a&&comparePassword(pass,a.fields[F.user.hash]||''))account={username:uname,role:a.fields[F.user.role],name:a.fields[F.user.name]||uname};}
+    if(!account){const users=await list('users',Object.values(F.user));const a=users.find(x=>x.fields[F.user.username]===uname&&x.fields[F.user.active]===true);if(a&&comparePassword(pass,a.fields[F.user.hash]||'')){account={username:uname,role:a.fields[F.user.role],name:a.fields[F.user.name]||uname};credential=credentialVersion(a.fields[F.user.hash]);}}
     if(account&&!['administrador','tecnico'].includes(account.role))account=null;
     if(!account)throw failure(401,'Usuario o contraseña incorrectos.');
     account.canManageRecords=account.role==='administrador'&&uname===ROOTUSER;
-    cookie(res,sign({user:uname,role:account.role,exp:Date.now()+12*3600000}));return json(res,200,{user:account});
+    cookie(res,sign({user:uname,role:account.role,credential,exp:Date.now()+12*3600000}));return json(res,200,{user:account});
   }
   if(p==='/api/logout'&&method==='POST'){cookie(res,'',true);return json(res,200,{ok:true});}
   const user=await identify(req);reqAuth(user);const admin=user.role==='administrador';user.canManageRecords=admin&&user.username===ROOTUSER;
@@ -222,6 +250,15 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     reqAdmin(user);const b=await requestBody(req);const uname=safeUsername(b.username);const pass=String(b.password||'');if(!/^[a-z][a-z0-9_-]{2,29}$/.test(uname)||pass.length<12||pass.length>128)throw failure(400,'Usuario de 3-30 caracteres y contraseña de al menos 12 caracteres.');
     if(uname===ROOTUSER)throw failure(409,'Usuario reservado.');const all=await list('users',[F.user.username]);if(all.some(r=>r.fields[F.user.username]===uname))throw failure(409,'Ese usuario ya existe.');
     await create('users',{[F.user.username]:uname,[F.user.name]:limit(b.name,100)||uname,[F.user.hash]:passwordHash(pass),[F.user.role]:'tecnico',[F.user.active]:true});return json(res,201,{ok:true});
+  }
+  const resetLink=p.match(/^\/api\/employees\/(rec[A-Za-z0-9]{14})\/password-reset$/);
+  if(resetLink&&method==='POST'){
+    reqAdmin(user);
+    if(user.username!==ROOTUSER)throw failure(403,'Solo dirección puede restablecer accesos.');
+    const row=await getOne('users',resetLink[1]),f=row.fields;
+    if(f[F.user.role]!=='tecnico'||f[F.user.active]!==true)throw failure(400,'Activa primero la cuenta del técnico.');
+    const token=sign({purpose:'password-reset',record:row.id,user:f[F.user.username],role:'tecnico',credential:credentialVersion(f[F.user.hash]),exp:Date.now()+15*60000});
+    return json(res,200,{token,expiresInMinutes:15});
   }
   const toggle=p.match(/^\/api\/employees\/(rec[A-Za-z0-9]{14})\/active$/);
   if(toggle&&method==='PATCH'){reqAdmin(user);const b=await requestBody(req);await patch('users',toggle[1],{[F.user.active]:b.active===true});return json(res,200,{ok:true});}
@@ -841,7 +878,7 @@ const server=http.createServer(async(req,res)=>{let held=[];try{
   const keys=writeKeys(url.pathname,req.method);
   if(keys.some(k=>writingJobs.has(k)))throw failure(409,'Este registro se está guardando. Espera un momento antes de reintentar.');
   held=keys;req.portalLocks=held;for(const key of held)writingJobs.add(key);
-  if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'daily-recovery-v12'});
+  if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'password-reset-v15'});
   if(url.pathname.startsWith('/api/'))return await api(req,res,url);
   return await staticFile(req,res,url.pathname);
 }catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{for(const key of held)writingJobs.delete(key);}});
@@ -854,5 +891,4 @@ if(process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT)server.listen
     bootstrapHashOk:ROOTHASH.startsWith('scrypt$')
   }));
 });
-export { passwordHash,comparePassword,sign,verify,server };
-
+export { resetPassword, credentialVersion, resetClaim, passwordHash,comparePassword,sign,verify,server };

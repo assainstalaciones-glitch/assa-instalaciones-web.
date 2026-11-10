@@ -16,7 +16,7 @@ test('Fechas reales y auditoría sin migrar notas históricas',()=>{
 test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t=>{
   process.env.AIRTABLE_TOKEN='pat-test-only';process.env.SESSION_SECRET='x'.repeat(40);
   process.env.BOOTSTRAP_USER='samuel';process.env.BOOTSTRAP_PASSWORD_HASH='scrypt$test$'+'0'.repeat(128);
-  const {server,sign}=await import('./server.mjs');
+  const {server,sign,credentialVersion}=await import('./server.mjs');
   const jid='rec00000000000001',other='rec00000000000002',oid='rec00000000000003',rid='rec00000000000004';
   const tables={
     tblsVLKBSafEEiUlI:[{id:jid,fields:{'Trabajo / referencia':'Encargo','Nombre del Cliente':'Cliente simulado','Estado':'En progreso','Operarios asignados portal':'saul','Fecha prevista':'2026-11-05','Importe cobrado':500,'Cobro confirmado (portal)':true}},{id:other,fields:{'Estado':'En progreso','Operarios asignados portal':'alex'}}],
@@ -45,7 +45,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
   t.after(()=>{globalThis.fetch=originalFetch;});
   const call=async(path,user='saul',method='GET',data)=>{
     const headers={'Content-Type':'application/json'};
-    if(user)headers.Cookie='assa_session='+sign({user,role:user==='samuel'?'administrador':'tecnico',exp:Date.now()+60000});
+    if(user)headers.Cookie='assa_session='+sign({user,credential:credentialVersion(''),role:user==='samuel'?'administrador':'tecnico',exp:Date.now()+60000});
     const req=Readable.from(data?[Buffer.from(JSON.stringify(data))]:[]);
     req.url='/api'+path;req.method=method;req.headers={host:'localhost',cookie:headers.Cookie};req.socket={remoteAddress:'test'};
     let status=200,result;const res={setHeader(){},writeHead(code){status=code;},end(body){result=JSON.parse(String(body));}};
@@ -310,5 +310,3 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=true;tables.tblZURy4PjvmL1Kr0[0].fields.Rol='desconocido';assert.equal((await call('/me')).status,401);
   });
 });
-
-

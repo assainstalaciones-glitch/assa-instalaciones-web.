@@ -9,6 +9,23 @@ import * as outcomes from './public/outcomes.js';
 import {changedJobFields} from './public/edit-fields.js';
 import * as relationships from './public/relationships.js';
 import {fifteenDayRange} from './public/partner-installations.js';
+
+test('Restablecer desde enlace borra el fragmento y valida confirmación antes de enviar',async()=>{
+ const nodes=new Map(),listeners=new Map();
+ const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',dataset:{},className:'',disabled:false,addEventListener(type,fn){listeners.set(id+':'+type,fn);},querySelector:x=>node(x),querySelectorAll:()=>[],reset(){}});return nodes.get(id);};
+ let values={password:'nueva-segura-2026',confirmation:'distinta-segura-2026'},requests=[],replaced;
+ const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},location:{hash:'#restablecer=token-simulado',pathname:'/',search:''},history:{replaceState(...args){replaced=args;}},fetch:async(path,opts)=>{requests.push({path,data:JSON.parse(opts.body)});return {ok:true,json:async()=>({ok:true})};},FormData:class {entries(){return Object.entries(values)[Symbol.iterator]();}},...recovery,...calendar,...outcomes,...relationships,changedJobFields,fifteenDayRange});
+ const code=readFileSync(new URL('./public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/init\(\);\s*$/,'');
+ vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={init};",context);
+ await context.ui.init();assert.equal(replaced[2],'/');assert.match(node('#app').innerHTML,/Elige tu nueva contraseña/);
+ const submit=listeners.get('#resetForm:submit'),event={preventDefault(){},target:node('#resetForm')};
+ await submit(event);assert.equal(requests.length,0);assert.match(node('#resetMessage').textContent,/no coinciden/);
+ values.confirmation=values.password;await submit(event);
+ assert.equal(requests.length,1);assert.equal(requests[0].path,'/api/password-reset');assert.equal(requests[0].data.token,'token-simulado');
+ assert.match(node('#app').innerHTML,/loginForm/);
+ clearTimeout(vm.runInContext('toastTimer',context));
+});
+
 test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>{
   const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',addEventListener(){},querySelector:x=>node(x),querySelectorAll:()=>[],getContext:()=>({fillRect(){}})});return nodes.get(id);};
   const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},FormData:class {entries(){return [][Symbol.iterator]();}},...recovery,...calendar,...outcomes,...relationships,changedJobFields,fifteenDayRange});
@@ -42,4 +59,3 @@ test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>
   ui.state.showAllTechnicianJobs=true;ui.renderJobs();assert.match(app.innerHTML,/Cliente &lt;prueba&gt;/);
   ui.state.viewMode='direccion';ui.state.showAllTechnicianJobs=false;ui.renderWork();assert.match(app.innerHTML,/Editar trabajo y parte/);assert.match(app.innerHTML,/Guardar planificación/);
 });
-
