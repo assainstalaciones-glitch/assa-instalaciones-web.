@@ -76,3 +76,19 @@ Sin AIRTABLE_TOKEN no está operativo el inicio de sesión: la API devuelve 503 
 - Las citas libres utilizan `Estado agenda` e `Historial agenda` en la tabla `AGENDA LIBRE ASSA`, con acciones de cancelación/restauración solo para la administración principal.
 - Las acciones exigen confirmación y comprobación del estado previo, conservan auditoría con usuario y fecha y no generan clientes u órdenes de trabajo. Esta agenda del portal no supone una modificación automática en Google Calendar.
 
+
+## Sincronización de agenda ASSA — primera fase (11/11/2026, rama de prueba)
+
+**Estado: no desplegado / no sincroniza Calendar directamente.** Los cambios de agenda del Portal deben conservar un registro fuente en Airtable, pero las credenciales de Google Calendar de ChatGPT NO están disponibles en Render.
+
+- Tabla nueva y existente en Airtable «Guía de Trabajo»: `SINCRONIZACIÓN AGENDA ASSA`, ID `tblJh8jWBP7TELGHu`.
+- Alta de instalación/visita, edición de fecha/hora y cancelación/recuperación crean una **intención pendiente de verificar** en esa tabla, con referencia a TRABAJOS y clave de operación. Se registra también el evento `calendar-sync-intent` en el campo existente «Historial dirección (portal)» para tener un respaldo en caso de fallo parcial.
+- No se cambian facturas, cobros, importes ni documentación firmada. Nunca se cancela automáticamente el trabajo técnico por una visita anulada cuando hay ejecución/firma: se conservan las prohibiciones existentes.
+- El endpoint de solo lectura `GET /api/admin/agenda-sync` muestra la cola y su estado a administradores. No entrega credenciales ni modifica Google Calendar.
+- El flujo de **conciliación** corresponde al Agente de Operaciones, con las herramientas de Airtable y Calendar que tenga autorizadas. Debe buscar por ID estable o etiqueta exacta `[ASSA-TRABAJO:rec...]`, no por nombres; registrar el mismo ID de evento de Calendar; ejecutar solo cambios inequívocos y releer ambas fuentes después. Si no encuentra vínculo inequívoco, **Conflicto** y revisión, no crear otro evento a ciegas ni borrar por semejanza.
+- Solo cambiar el estado de cola a **Sincronizado** con prueba real de ambas fuentes, ID de evento, fecha de comprobación y evidencia. Antes, permanece **Pendiente de verificar**. El motor propiamente instantáneo requiere una integración OAuth/servicio Google autorizada por separado. Esta primera fase usa las rondas programadas del agente, por lo que **NO es sincronización en tiempo real**.
+- Si la escritura del registro de cola falla, la acción primaria del Portal permanece guardada: el usuario verá aviso explícito y Operaciones deberá reconstruir la cola desde el historial del trabajo. La operación no debe repetirse ciegamente.
+- Las citas libres de `AGENDA LIBRE ASSA` se mantienen fuera de esta fase; no se cambian sus reglas.
+- Prohibido ejecutar pruebas que creen, cambien o cancelen eventos reales de clientes. `agenda-sync.test.mjs` prueba con datos ficticios: identidad exacta, reintentos, cancelación sin afectar facturación, conflicto por duplicado y no reactivación de cancelados.
+
+**Antes de activar producción:** CI verde; verificar manualmente los campos y tabla con datos de prueba NO operativos; revisar cambios y permisos de Airtable; habilitar la rama/versión solamente tras autorización de despliegue; hacer prueba piloto con una nueva cita real de bajo riesgo, verificando Portal, Airtable y Calendar en el orden establecido; medir duplicados y retrasos. Los cambios manuales de ChatGPT antes del despliegue siguen sujetos a conciliación en cada ejecución de Operaciones.
