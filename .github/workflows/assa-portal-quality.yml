@@ -1,5 +1,11 @@
 name: ASSA | Pruebas de calidad y seguridad del portal
 on:
+  pull_request:
+    branches:
+      - portal-empleados-v1
+    paths:
+      - 'empleados/**'
+      - '.github/workflows/assa-portal-quality.yml'
   push:
     branches:
       - portal-empleados-v1
@@ -24,7 +30,7 @@ jobs:
       - name: Leer la rama del portal
         uses: actions/checkout@v4
         with:
-          ref: portal-empleados-v1
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'portal-empleados-v1' }}
           persist-credentials: false
       - name: Preparar Node.js
         uses: actions/setup-node@v4
