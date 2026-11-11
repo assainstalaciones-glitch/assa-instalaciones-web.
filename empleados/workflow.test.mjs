@@ -23,7 +23,8 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     tblZURy4PjvmL1Kr0:[{id:'rec00000000000005',fields:{'Usuario':'saul','Rol':'tecnico','Activo':true}},{id:'rec00000000000006',fields:{'Usuario':'alex','Rol':'tecnico','Activo':true}}],
     tblprtqasdBxVVsNx:[{id:rid,fields:{'Trabajo':[jid],'Usuario operario':'saul','Horas reales':2,'Observaciones':'Instalación probada','Fecha trabajo':'2026-11-05'}}],
     tblvZgkNh2cX1bTNx:[],
-    tblKc1Tvz45Fu5J9b:[]
+    tblKc1Tvz45Fu5J9b:[],
+    tblJh8jWBP7TELGHu:[]
   };
   const writes=[];const originalFetch=globalThis.fetch;
   globalThis.fetch=async(input,opts={})=>{
@@ -40,7 +41,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     if(method==='GET')return Response.json(id?records.find(r=>r.id===id):{records});
     writes.push({table,id,method,fields:body.fields});
     if(method==='PATCH'){const r=records.find(r=>r.id===id);assert.ok(r);Object.assign(r.fields,body.fields);return Response.json(r);}
-    assert.ok(['tblvZgkNh2cX1bTNx','tblsVLKBSafEEiUlI','tblKc1Tvz45Fu5J9b','tblprtqasdBxVVsNx','tblqkKyk1HvE3rFKw'].includes(table));const r={id:table==='tblvZgkNh2cX1bTNx'?oid:'rec'+String(records.length+100).padStart(14,'0'),fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
+    assert.ok(['tblvZgkNh2cX1bTNx','tblsVLKBSafEEiUlI','tblKc1Tvz45Fu5J9b','tblprtqasdBxVVsNx','tblqkKyk1HvE3rFKw','tblJh8jWBP7TELGHu'].includes(table));const r={id:table==='tblvZgkNh2cX1bTNx'?oid:'rec'+String(records.length+100).padStart(14,'0'),fields:{...body.fields,'Número de orden':'OT-SIMULADA'}};records.push(r);return Response.json(r);
   };
   t.after(()=>{globalThis.fetch=originalFetch;});
   const call=async(path,user='saul',method='GET',data)=>{
@@ -72,7 +73,14 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal((await call('/jobs/'+jid+'/schedule','samuel','PATCH',{...schedule,users:['nadie']})).status,400);
     assert.equal((await call('/jobs/'+jid+'/schedule','samuel','PATCH',schedule)).status,200);
     assert.equal((await call('/jobs/'+jid+'/schedule','samuel','PATCH',schedule)).status,409);
-    assert.deepEqual(Object.keys(writes[0].fields).sort(),['Fecha prevista','Hora fin prevista (portal)','Hora inicio prevista (portal)','Operarios asignados portal']);
+    assert.deepEqual(Object.keys(writes[0].fields).sort(),['Fecha prevista','Historial dirección (portal)','Hora fin prevista (portal)','Hora inicio prevista (portal)','Operarios asignados portal']);
+    const queued=tables.tblJh8jWBP7TELGHu;
+    assert.equal(queued.length,1);
+    assert.equal(queued[0].fields.Estado,'Pendiente de verificar');
+    assert.deepEqual(queued[0].fields.Trabajo,[jid]);
+    assert.equal(JSON.parse(queued[0].fields.Después).start,'09:00');
+    assert.equal((await call('/admin/agenda-sync','saul')).status,403);
+    assert.equal((await call('/admin/agenda-sync','samuel')).status,200);
   });
   await t.test('Instalaciones en el mismo día: rechaza solape y permite una franja posterior; reintento sin duplicados',async()=>{
     const appointment={operationId:'11111111-1111-4111-8111-111111111111',date:'2026-11-06',start:'10:30',end:'12:00',users:['saul'],name:'Otro cliente',phone:'600123456',address:'Cambrils',description:'Otra instalación',kind:'installation'};
@@ -117,7 +125,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
   const cancel={action:'cancel',operationId:'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbbb',expected:{status:'Aceptado / Programado',outcome:''}};
   assert.equal((await call('/jobs/'+id+'/agenda-state','saul','PATCH',cancel)).status,403);
   const r=await call('/jobs/'+id+'/agenda-state','samuel','PATCH',cancel);assert.equal(r.status,200,JSON.stringify(r.data));
-  assert.equal(fields.Estado,'Cancelado');assert.equal(fields['Importe cobrado'],200);assert.equal(JSON.parse(fields['Historial dirección (portal)']).length,1);
+  assert.equal(fields.Estado,'Cancelado');assert.equal(fields['Importe cobrado'],200);assert.equal(JSON.parse(fields['Historial dirección (portal)']).filter(e=>e.kind==='agenda-status').length,1);
   const n=writes.length;assert.equal((await call('/jobs/'+id+'/agenda-state','samuel','PATCH',cancel)).status,200);assert.equal(writes.length,n);
   const restore={action:'restore',operationId:'bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbbb',expected:{status:'Cancelado',outcome:'Cancelado por ASSA'}};
   tables.tblsVLKBSafEEiUlI.push({id:otherId,fields:{'Nombre del Cliente':'Otro solapado','Estado':'Aceptado / Programado','Fecha prevista':'2026-11-09','Hora inicio prevista (portal)':'09:15','Hora fin prevista (portal)':'10:30','Operarios asignados portal':'saul'}});
@@ -125,7 +133,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
   assert.equal(fields.Estado,'Cancelado');tables.tblsVLKBSafEEiUlI.splice(tables.tblsVLKBSafEEiUlI.findIndex(x=>x.id===otherId),1);
   const recovered=await call('/jobs/'+id+'/agenda-state','samuel','PATCH',restore);assert.equal(recovered.status,200,JSON.stringify(recovered.data));
   assert.equal(fields.Estado,'Aceptado / Programado');assert.equal(fields['Resultado intervención (portal)'],'');assert.equal(fields['Importe cobrado'],200);
-  assert.equal(JSON.parse(fields['Historial dirección (portal)']).length,2);
+  assert.equal(JSON.parse(fields['Historial dirección (portal)']).filter(e=>e.kind==='agenda-status').length,2);
   tables.tblsVLKBSafEEiUlI.splice(tables.tblsVLKBSafEEiUlI.findIndex(x=>x.id===id),1);
  });
  await t.test('Un trabajo con ejecución no admite anulación rápida',async()=>{
@@ -143,7 +151,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal((await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',{...correction,changes:{paymentConfirmed:'false'}})).status,400);
     const r=await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',correction);assert.equal(r.status,200,JSON.stringify(r.data));
     assert.equal(job.fields.Estado,'Presupuesto pendiente');assert.equal(report.fields['Usuario operario'],'saul');assert.equal(report.fields['Horas reales'],1);
-    assert.equal(JSON.parse(job.fields['Historial dirección (portal)'])[0].reportBefore['Horas reales'],2);
+    assert.equal(JSON.parse(job.fields['Historial dirección (portal)']).find(e=>e.reportBefore).reportBefore['Horas reales'],2);
     const count=writes.length;assert.equal((await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',correction)).status,200);assert.equal(writes.length,count);
     assert.equal((await call('/jobs/'+jid+'/direction-edit','samuel','PATCH',{...correction,operationId:'33333333-3333-4333-8333-333333333333'})).status,409);
     job.fields.Estado='En progreso';
