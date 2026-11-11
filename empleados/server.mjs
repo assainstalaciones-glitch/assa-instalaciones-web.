@@ -18,11 +18,12 @@ import { buildCommercialOT } from './ot-commercial.mjs';
 import { confirmedBudget, prepareOtFields } from './ot-sync.mjs';
 import { buildAdminDashboard } from './admin-dashboard.mjs';
 import { buildReconciliationView } from './reconciliation-view.mjs';
+import { makeAgendaIntent, agendaLedgerFields } from './agenda-sync.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 10000);
 const BASE = process.env.AIRTABLE_BASE_ID || 'appdHOIMfkGPduA83';
-const T = { partners:'tblXXBlGHp5UByNj4', jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx', reconciliationDocs:'tblW53PDguHrrOIs1', reconciliation:'tblMvunG5HhUA1qia', freeAgenda:'tblKc1Tvz45Fu5J9b' };
+const T = { partners:'tblXXBlGHp5UByNj4', jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx', reconciliationDocs:'tblW53PDguHrrOIs1', reconciliation:'tblMvunG5HhUA1qia', freeAgenda:'tblKc1Tvz45Fu5J9b', agendaSync:'tblJh8jWBP7TELGHu' };
 const TOKEN = (process.env.AIRTABLE_TOKEN || '').trim();
 const SECRET = process.env.SESSION_SECRET || '';
 const ROOTUSER = (process.env.BOOTSTRAP_USER || '').trim().toLowerCase();
@@ -67,6 +68,24 @@ async function getOne(table,id){if(!validId(id))throw failure(400,'Referencia in
 async function list(table,fields,cap=500){let records=[],offset='';do{const qs=new URLSearchParams({pageSize:'100'});if(offset)qs.set('offset',offset);const data=await airtable(table,'GET',`?${qs}`,null,fields);records.push(...(data.records||[]));offset=data.offset||'';}while(offset && records.length<cap);if(offset)throw failure(503,'La consulta supera el límite seguro. No se ha aplicado ningún cambio.');return records;}
 async function create(table,fields){return airtable(table,'POST','',{fields,typecast:false});}
 async function patch(table,id,fields){return airtable(table,'PATCH',`/${id}`,{fields,typecast:false});}
+// Calendar is NOT connected to this server. Record a persistent, verified outbox
+// entry for the authorized agent to process with its separate Calendar connection.
+async function queueAgendaIntent(intent){
+  const rows=await list('agendaSync',['Clave de operación'],3000);
+  const existing=rows.find(r=>r.fields['Clave de operación']===intent.key);
+  if(existing)return {id:existing.id,unchanged:true};
+  const written=await create('agendaSync',agendaLedgerFields(intent));
+  const saved=await getOne('agendaSync',written.id);
+  if(saved.fields['Clave de operación']!==intent.key)throw Error('No se verificó el registro de sincronización.');
+  return {id:written.id};
+}
+async function agendaQueueWarnings(intent){
+  try{await queueAgendaIntent(intent);return [];}
+  catch(e){
+    console.error('agenda outbox:',e?.message||e);
+    return ['La cita está guardada en Airtable, pero no se ha comprobado su registro de sincronización con Google Calendar. Operaciones debe conciliar el historial.'];
+  }
+}
 async function requestBody(req){let chunks=[],bytes=0;for await(const c of req){bytes+=c.length;if(bytes>7*1024*1024)throw failure(413,'El archivo o formulario es demasiado grande.');chunks.push(c);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch{throw failure(400,'Datos no válidos.');}}
 function originCheck(req){const origin=req.headers.origin;if(origin && new URL(origin).host!==req.headers.host)throw failure(403,'Solicitud no autorizada.');const site=req.headers['sec-fetch-site'];if(site && site==='cross-site')throw failure(403,'Solicitud externa bloqueada.');}
 async function identify(req){const raw=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('assa_session='))?.split('=')[1]||'';const claim=verify(raw);if(!claim||claim.purpose)return null;
@@ -366,6 +385,15 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const verified=await getOne('jobs',job.id);if(!readAudit(verified).some(e=>e.id===event.id&&e.state==='applied'))throw failure(409,'No se ha podido verificar la auditoría.');
     return json(res,200,{ok:true,notice:event.reportMode==='annotation'?'Rectificación añadida al historial. El parte cerrado y su PDF original se conservan.':'Corrección de dirección guardada con historial. No se ha cambiado el estado del trabajo.'});
   }
+  if(p==='/api/admin/agenda-sync'&&method==='GET'){
+    reqAdmin(user);
+    const rows=await list('agendaSync',['Clave de operación','Trabajo','Tipo de cambio','Estado','ID evento Calendar','Última verificación','Bloqueo / conflicto'],3000);
+    return json(res,200,{source:'airtable-outbox',calendarConnection:'not-configured-in-portal',
+      items:rows.map(r=>({id:r.id,key:r.fields['Clave de operación'],jobId:r.fields.Trabajo?.[0]||'',
+        type:r.fields['Tipo de cambio'],status:r.fields.Estado,
+        calendarEventId:r.fields['ID evento Calendar']||'',verifiedAt:r.fields['Última verificación']||null,
+        error:r.fields['Bloqueo / conflicto']||''}))});
+  }
   const scheduleMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/schedule$/);
   if(scheduleMatch&&method==='PATCH'){
     reqAdmin(user);
@@ -384,11 +412,19 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     const start=b.start||'',end=b.end||'';
     const warnings=await checkSlot({date:b.date,start,end,users:b.users,exclude:job.id});
     const changes={[F.job.start]:start,[F.job.end]:end,[F.job.date]:b.date||null,[F.job.assigned]:[...new Set(b.users)].join(', ')};
+    const after=scheduleSnapshot({...job.fields,...changes});
+    const changed=JSON.stringify(prior)!==JSON.stringify(after);
+    if(!changed)return json(res,200,{job:jobView(job,true),warnings,unchanged:true,calendarSync:'no-new-change'});
+    const intent=makeAgendaIntent({jobId:job.id,action:'schedule',before:prior,after,
+      operationId:b.operationId||randomBytes(12).toString('hex'),by:user.username});
+    changes[AUDIT_FIELD]=writeAudit([...readAudit(job),intent]);
     await patch('jobs',job.id,changes);
     const saved=await getOne('jobs',job.id);
     const stored=scheduleSnapshot(saved.fields);
-    if(stored.date!==b.date||stored.assigned!==changes[F.job.assigned]||stored.start!==start||stored.end!==end)throw failure(409,'Revisa la planificación: no coincide con el cambio solicitado.');
-    return json(res,200,{job:jobView(saved,true),warnings});
+    if(stored.date!==(b.date||'')||stored.assigned!==changes[F.job.assigned]||stored.start!==start||stored.end!==end||
+       !readAudit(saved).some(e=>e.key===intent.key))throw failure(409,'Revisa la planificación: no coincide con el cambio solicitado.');
+    return json(res,200,{job:jobView(saved,true),warnings:[...warnings,...await agendaQueueWarnings(intent)],
+      calendarSync:'pending'});
   }
   if(p==='/api/admin/partner-installations'&&method==='GET'){
     reqAdmin(user);const from=url.searchParams.get('from')||'',to=url.searchParams.get('to')||'',partnerId=url.searchParams.get('partnerId')||'';if(!validDate(from)||!validDate(to)||from>to||(partnerId&&partnerId!=='other'&&!validId(partnerId)))throw failure(400,'Selecciona colaborador y fechas válidas.');
@@ -467,11 +503,17 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       if(before.date&&before.start&&users.length)warnings=await checkSlot({date:before.date,start:before.start,end:before.end,users,exclude:job.id});
     }
     const entry={id,kind:'agenda-status',action,by:user.username,at:new Date().toISOString(),beforeStatus:before.status,beforeOutcome:before.outcome||'',afterStatus:nextState,afterOutcome:nextOutcome};
-    const fields={[F.job.state]:nextState,[F.job.outcome]:nextOutcome,[AUDIT_FIELD]:writeAudit([...audit,entry])};
+    const intent=makeAgendaIntent({jobId:job.id,action,operationId:b.operationId,by:user.username,
+      before:{...scheduleSnapshot(job.fields),status:before.status,outcome:before.outcome||''},
+      after:{...scheduleSnapshot(job.fields),status:nextState,outcome:nextOutcome}});
+    const fields={[F.job.state]:nextState,[F.job.outcome]:nextOutcome,[AUDIT_FIELD]:writeAudit([...audit,entry,intent])};
     await patch('jobs',job.id,fields);
     const verified=await getOne('jobs',job.id);
     if(verified.fields[F.job.state]!==nextState||(verified.fields[F.job.outcome]||'')!==nextOutcome||!readAudit(verified).some(e=>e.id===id))throw failure(409,'No se ha podido verificar el cambio. Actualiza antes de reintentar.');
-    return json(res,200,{ok:true,job:jobView(verified,true),warnings,notice:action==='cancel'?'Cita cancelada. Se conserva el expediente y no se ha modificado la facturación.':'Cita recuperada. Comprueba la disponibilidad y avisa al equipo si corresponde.'});
+    if(!readAudit(verified).some(e=>e.key===intent.key))throw failure(409,'No se guardó la auditoría de la sincronización.');
+    return json(res,200,{ok:true,job:jobView(verified,true),warnings:[...warnings,...await agendaQueueWarnings(intent)],
+      calendarSync:'pending',
+      notice:action==='cancel'?'Cita cancelada en Airtable. Sincronización con Google Calendar pendiente de comprobación.':'Cita recuperada en Airtable. Comprueba la disponibilidad y sincronización con Google Calendar.'});
   }
   const agendaNoteMatch=p.match(/^\/api\/agenda-notes\/(rec[A-Za-z0-9]{14})\/state$/);
   if(agendaNoteMatch&&method==='PATCH'){
@@ -524,8 +566,21 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(client)fields[F.job.client]=[client.id];
     if(partnerInstallation){const units=b.units===undefined||b.units===''?1:Number(b.units);if(!Number.isInteger(units)||units<1||units>100)throw failure(400,'Indica entre 1 y 100 instalaciones.');fields[I.mode]=INSTALLATION_MODE;fields[I.units]=units;}
     const relationships=await prepareRelationships(b.relationships||{}, {},{findPartner:id=>getOne('partners',id),findClient:id=>getOne('clients',id)});Object.assign(fields,relationships);
-    const created=await create('jobs',fields),saved=await getOne('jobs',created.id);
-    return json(res,201,{job:jobView(saved,true),warnings,notice:partnerInstallation?'Instalación del colaborador guardada sin datos del cliente final.':client?'Instalación añadida al calendario.':'Cita añadida con contacto por verificar; no se ha creado ni fusionado una ficha de CLIENTES.'});
+    const created=await create('jobs',fields);
+    const intent=makeAgendaIntent({jobId:created.id,action:'create',operationId:b.operationId,by:user.username,
+      after:scheduleSnapshot(fields)});
+    try{
+      await patch('jobs',created.id,{[AUDIT_FIELD]:writeAudit([intent])});
+      const auditSaved=await getOne('jobs',created.id);
+      if(!readAudit(auditSaved).some(e=>e.key===intent.key))throw Error('No se verificó el historial de creación');
+    }catch(e){
+      console.error('agenda create audit:',e?.message||e);
+      warnings.push('La cita se guardó, pero su historial de sincronización requiere revisión manual.');
+    }
+    warnings.push(...await agendaQueueWarnings(intent));
+    const saved=await getOne('jobs',created.id);
+    return json(res,201,{job:jobView(saved,true),warnings,calendarSync:'pending',
+      notice:partnerInstallation?'Instalación del colaborador registrada en Airtable; Calendar pendiente de comprobar.':client?'Instalación registrada en Airtable; Calendar pendiente de comprobar.':'Cita guardada en Airtable; Calendar pendiente de comprobar. No se creó ni fusionó una ficha de CLIENTES.'});
   }
   if(p==='/api/admin/closures'&&method==='GET'){
     reqAdmin(user);
