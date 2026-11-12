@@ -76,8 +76,8 @@ async function identify(req){const raw=(req.headers.cookie||'').split(';').map(s
 }
 function reqAuth(user){if(!user)throw failure(401,'Accede con tu usuario y contraseña.');}
 function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failure(403,'Solo administración puede realizar esta acción.');}
-function assigned(job,user){if(user.role==='administrador')return true;const names=(job.fields[F.job.assigned]||'').toLowerCase().split(/[,;\n]/).map(v=>v.trim());return ACTIVE.has(job.fields[F.job.state]) && names.includes(user.username);}
-async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!assigned(job,user))throw failure(403,'Este trabajo no está asignado a tu usuario.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
+function teamCanAccess(job,user){return user.role==='administrador'||(user.role==='tecnico'&&ACTIVE.has(job.fields[F.job.state]));}
+async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!teamCanAccess(job,user))throw failure(403,'Este trabajo no está abierto para el equipo.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
 function signedPendingClosure(order,jobId){return (order.fields[F.order.job]||[]).includes(jobId)&&order.fields[F.order.state]==='Firmado / archivado'&&!!order.fields[F.order.pdf]?.length&&reviewEvent(order)?.state==='pending';}
 function freeAgendaView(record){const f=record.fields;return {id:record.id,title:f[F.freeAgenda.title]||'',date:f[F.freeAgenda.date]||'',start:f[F.freeAgenda.start]||'',end:f[F.freeAgenda.end]||'',kind:f[F.freeAgenda.kind]||'Cita libre',location:f[F.freeAgenda.location]||'',notes:f[F.freeAgenda.notes]||'',status:f[F.freeAgenda.status]||'Activa'};}
 function jobView(record,admin){const f=record.fields;const data={partnerInstallation:f[I.mode]===INSTALLATION_MODE,installationUnits:f[I.units]??null,executedOn:f[I.executedOn]||'',...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:(f[I.mode]===INSTALLATION_MODE&&f[REL_FIELDS.partnerName])||f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin){data.clientId=(f[F.job.client]||[])[0]||'';data.economics=economicsView(f);}return data;}
@@ -240,7 +240,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   const user=await identify(req);reqAuth(user);const admin=user.role==='administrador';user.canManageRecords=admin&&user.username===ROOTUSER;
   if(p==='/api/me'&&method==='GET')return json(res,200,{user});
   if(p==='/api/jobs'&&method==='GET'){
-    const all=await list('jobs',Object.values(F.job),1000);let filtered=all.filter(x=>admin||assigned(x,user));if(!admin){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);const pendingSigned=new Set(orders.filter(o=>o.fields[F.order.state]==='Firmado / archivado'&&!!o.fields[F.order.pdf]?.length&&reviewEvent(o)?.state==='pending').flatMap(o=>o.fields[F.order.job]||[]));filtered=filtered.filter(x=>ACTIVE.has(x.fields[F.job.state])&&!pendingSigned.has(x.id));}
+    const all=await list('jobs',Object.values(F.job),1000);let filtered=all.filter(x=>teamCanAccess(x,user));if(!admin){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);const pendingSigned=new Set(orders.filter(o=>o.fields[F.order.state]==='Firmado / archivado'&&!!o.fields[F.order.pdf]?.length&&reviewEvent(o)?.state==='pending').flatMap(o=>o.fields[F.order.job]||[]));filtered=filtered.filter(x=>ACTIVE.has(x.fields[F.job.state])&&!pendingSigned.has(x.id));}
     return json(res,200,{jobs:filtered.map(x=>jobView(x,admin)).sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999'))});
   }
   if(p==='/api/employees'&&method==='GET'){
@@ -497,8 +497,8 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     if(b.billingMode&&!['direct','partner'].includes(b.billingMode))throw failure(400,'Modalidad de encargo no válida.');
     if(partnerInstallation&&b.kind!=='installation')throw failure(400,'Selecciona instalación para colaborador.');
     const description=limit(b.description,220)||(partnerInstallation?'Instalación para colaborador':'');
-    if(!/^[a-f0-9-]{36}$/.test(b.operationId||'')||!['installation','visit'].includes(b.kind)||!description||!Array.isArray(b.users)||!b.users.length)
-      throw failure(400,'Indica el trabajo, al menos un técnico y el tipo de cita.');
+    if(!/^[a-f0-9-]{36}$/.test(b.operationId||'')||!['installation','visit'].includes(b.kind)||!description||!Array.isArray(b.users)||b.users.some(x=>typeof x!=='string'||safeUsername(x)!==x))
+      throw failure(400,'Indica el trabajo, el tipo de cita y una selección válida de técnicos (puede quedar vacía).');
     const reference='AGENDA-'+b.operationId;
     const jobs=await list('jobs',Object.values(F.job),3000);
     const existing=jobs.find(j=>j.fields[F.job.ref]===reference);

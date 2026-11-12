@@ -56,9 +56,9 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal((await call('/admin/closures',null)).status,401);
     for(const p of ['/admin/dashboard','/admin/closures','/employees'])assert.equal((await call(p)).status,403);
   });
-  await t.test('Técnico solo ve sus asignaciones y no recibe importes',async()=>{
-    const r=await call('/jobs');assert.equal(r.data.jobs.length,1);assert.equal(r.data.jobs[0].id,jid);
-    assert.ok(!JSON.stringify(r.data).includes('500'));assert.equal((await call('/jobs/'+other)).status,403);
+  await t.test('Técnico ve todos los trabajos abiertos y no recibe importes',async()=>{
+    const r=await call('/jobs');assert.equal(r.data.jobs.length,2);assert.ok(r.data.jobs.some(j=>j.id===jid));assert.ok(r.data.jobs.some(j=>j.id===other));
+    assert.ok(!JSON.stringify(r.data).includes('500'));assert.equal((await call('/jobs/'+other)).status,200);
   });
   await t.test('No puede asignar, cerrar sin revisión ni tocar cobros',async()=>{
     assert.equal((await call('/jobs/'+jid+'/schedule','saul','PATCH',{})).status,403);
@@ -278,7 +278,7 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     const body={hours:2,date:'2026-12-20',actualStart:'09:05',actualEnd:'11:05',notes:'Instalación realizada',material:''};
     const saved=await call('/jobs/'+id+'/reports','saul','POST',body);assert.equal(saved.status,200,JSON.stringify(saved.data));assert.equal(saved.data.report.actualEnd,'11:05');assert.equal(saved.data.report.actualStart,'09:05');
     assert.equal((await call('/jobs/'+id,'samuel')).data.job.end,'');
-    assert.equal((await call('/jobs/'+id+'/reports','alex','POST',body)).status,403);
+    assert.equal((await call('/jobs/'+id+'/reports','alex')).status,200);
     const before=writes.length;assert.equal((await call('/jobs/'+id+'/reports','saul','POST',{...body,actualEnd:'08:00'})).status,400);assert.equal(writes.length,before);
     const oldClient=await call('/jobs/'+id+'/reports','saul','POST',{hours:2,date:'2026-12-20',notes:'Actualiza notas',material:''});assert.equal(oldClient.data.report.actualEnd,'11:05');
   });
@@ -305,7 +305,15 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
     assert.equal(r.status,200,JSON.stringify(r.data));const summary=(await call('/admin/partner-installations?from=2026-11-08&to=2026-11-22&partnerId='+partnerId,'samuel')).data;assert.equal(summary.counts.completedJobs,1);assert.equal(summary.counts.completedUnits,2);assert.equal(summary.counts.toPrepareUnits,2);
     assert.equal((await call('/admin/partner-installations?from=2026-11-07&to=2026-11-07&partnerId='+partnerId,'samuel')).data.counts.completedUnits,0);
   });
-  await t.test('Desactivar técnico revoca acceso; rol desconocido no autentica',async()=>{
+  await t.test('Una cita sin técnico aparece para Saúl y Alex, manteniendo los permisos',async()=>{
+     const b={operationId:'52345678-1234-4123-8123-123456789abc',kind:'installation',users:[],date:'2026-11-11',start:'08:30',end:'10:30',name:'Cliente prueba equipo',phone:'600123999',address:'Dirección de prueba',description:'Trabajo compartido sin asignación'};
+     const r=await call('/appointments','samuel','POST',b);assert.equal(r.status,201,JSON.stringify(r.data));assert.equal(r.data.job.assigned,'');
+     assert.equal((await call('/jobs/'+r.data.job.id,'saul')).status,200);
+     assert.equal((await call('/jobs/'+r.data.job.id,'alex')).status,200);
+     assert.equal((await call('/jobs/'+r.data.job.id+'/schedule','saul','PATCH',{})).status,403);
+     assert.equal((await call('/admin/jobs/'+r.data.job.id+'/confirm','alex','PATCH',{field:'paymentConfirmed',checked:true})).status,403);
+   });
+   await t.test('Desactivar técnico revoca acceso; rol desconocido no autentica',async()=>{
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=false;assert.equal((await call('/me')).status,401);
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=true;tables.tblZURy4PjvmL1Kr0[0].fields.Rol='desconocido';assert.equal((await call('/me')).status,401);
   });
