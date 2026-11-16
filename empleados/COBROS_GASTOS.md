@@ -23,3 +23,9 @@ Pantalla de administración con cobros efectivos sin IVA, gastos documentados y 
 - Acceso financiero restringido a la cuenta principal. Ninguna factura ni ficha TRABAJOS se edita desde finanzas.
 - Conciliación bancaria, importación automática de facturas y cierre contable quedan pendientes de justificantes/conexión adecuados: nunca inferir fecha bancaria de la fecha de factura, de trabajo o del checkbox.
 - Comprobar en despliegue: 1) build/CI, 2) endpoint /health, 3) acceso anónimo bloqueado, 4) UI móvil; documentar bloqueos.
+
+## Revisión de costes documentados v5
+- El formulario de Dirección «Registrar costes directos comprobados» permite al usuario principal aportar base de venta, coste material, otros directos, horas-persona y coste-hora confirmado junto a su evidencia documental. Ningún campo desconocido se rellena con 0 automáticamente.
+- Escribe sólo campos económicos permitidos de TRABAJOS; no modifica número, importe, estado ni documento de la factura, ni cambia el cobro. Mantiene historial de revisión con operación única y marca «Parcial orientativo», nunca «Completo documentado» sin auditoría adicional.
+- Una modificación concurrente exige recargar; si hay un importe anterior distinto, bloquea la sobrescritura automática. Repetir exactamente el mismo envío no duplica notas.
+- Revisar siempre nóminas y Seguridad Social incluidas en gasto fijo antes de interpretar el coste-hora como coste adicional de empresa. El módulo no declara beneficio contable real ni caja disponible sin datos suficientes.
