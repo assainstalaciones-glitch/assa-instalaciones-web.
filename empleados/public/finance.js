@@ -21,6 +21,11 @@ export function financeScreen({layout,api,h,toast,today,canWrite}){
  (data.crm.pending.map(x=>'<tr><td>'+h(x.concept)+'</td><td>'+money(x.remaining)+'</td><td>'+h(x.status)+'</td><td>'+h(x.invoice)+'</td></tr>').join('')||'<tr><td colspan="4">No hay deudas identificadas con este criterio.</td></tr>')+
  '</tbody></table></div></details>'+
  '<p><strong>'+data.crm.missingPaymentDates+' trabajos cobrados necesitan desglose de fechas.</strong> No se trasladan automáticamente a la tabla por mes, para no inventar cuándo se recibió el dinero.</p></section>'+
+ '<section class="panel" id="finance-reconcile"><h2>Por conciliar · '+data.crm.toReconcile.length+' trabajos</h2>'+
+ '<p>Selecciona un trabajo y registra cada abono con su fecha real y evidencia. <strong>No uses la fecha de la factura o de ejecución como fecha de pago.</strong> El importe indicado es el máximo que falta fechar, no necesariamente un único pago.</p>'+
+ '<div class="finance-queue">'+(data.crm.toReconcile.map(x=>'<article class="finance-queue-item"><div><strong>'+h(x.concept)+'</strong><p>Factura '+h(x.invoice||'sin vincular')+' · '+money(x.missing)+' por fechar (IVA incl.)</p></div>'+
+ (canWrite?'<button type="button" class="button light small" data-reconcile-job="'+h(x.id)+'">Registrar abono</button>':'')+'</article>').join('')||
+ '<p>Los cobros registrados en TRABAJOS ya están fechados en el auxiliar.</p>')+'</div></section>'+
   '<section class="panel"><h2>Resultado por día, semana o mes</h2>'+
  (data.crm.unassignedGross>0?'<p class="finance-clarification"><strong>'+money(data.crm.unassignedGross)+' cobrados según trabajos, aún sin fecha de ingreso desglosada (IVA incluido).</strong> No se pueden asignar con seguridad a octubre o noviembre. Por eso el resultado de los periodos aparece pendiente, no como una pérdida ficticia.</p>':'')+
  '<p>Los ingresos de esta tabla sólo incluyen pagos con fecha real registrada en el auxiliar. Los gastos son bases sin IVA y pueden incluir previsiones. Nunca mezclamos el total cobrado con IVA con el gasto sin IVA.</p>'+
@@ -33,19 +38,49 @@ export function financeScreen({layout,api,h,toast,today,canWrite}){
  '<div class="finance-period-stat finance-period-result"><span>Resultado</span><strong>'+h(outcome(r.result))+'</strong></div>'+
  '</article>').join('')+'</div>'+
  '<p class="finance-small-print">Un 0 € en «cobros con fecha» significa que no hay pagos fechados para ese periodo; no significa que ASSA no haya cobrado. El resultado no es beneficio contable ni saldo bancario.</p></section>'+
+ '<section class="panel"><h2>Calidad de la información</h2>'+
+ '<p><strong>'+data.quality.costCoverage.complete+' de '+data.quality.costCoverage.jobs+' trabajos terminados en este periodo</strong> tienen campos de materiales, otros costes y horas o mano de obra cumplimentados. Sin ellos no es posible calcular el margen real por trabajo.</p>'+
+ (data.quality.costCoverage.missing.length?'<details><summary>Trabajos con costes por completar ('+data.quality.costCoverage.missing.length+(data.quality.costCoverage.jobs-data.quality.costCoverage.complete>40?'+':'')+')</summary><ul>'+
+ data.quality.costCoverage.missing.map(x=>'<li>'+h(x.concept)+'</li>').join('')+'</ul></details>':'')+
+ '<details><summary>Gastos fijos registrados ('+data.quality.fixedDetails.length+')</summary><p>Importes mensuales equivalentes sin IVA. Una previsión no acredita una factura pagada. No duplicar nóminas y coste horario en el resultado de empresa.</p>'+
+ '<div class="finance-queue">'+data.quality.fixedDetails.map(x=>'<div class="finance-queue-item"><span>'+h(x.concept)+' · '+h(x.status)+'</span><strong>'+(x.monthly===null?'Sin importe':money(x.monthly)+'/mes')+'</strong></div>').join('')+'</div></details>'+
+ '<div class="actions"><button type="button" class="button light small" data-nav="reconciliation">Ver conciliación de facturas</button></div></section>'+
  (canWrite?'<section class="panel"><details><summary>Registrar un cobro o una factura de gasto</summary><p>Un registro por pago parcial. Introduce solo el importe recibido y su fecha real. Para gastos, usa fecha de factura. No se cambia la factura ni el cobro acumulado del trabajo.</p><form id="finance-entry"><div class="finance-grid">'+
- '<label>Tipo<select name="type"><option>Cobro</option><option>Gasto</option></select></label>'+input('date','Fecha real','date',true,today)+input('concept','Concepto')+input('party','Cliente o proveedor')+input('reference','Factura / referencia del pago')+
- input('base','Base del movimiento sin IVA','number')+input('vat','IVA del movimiento','number')+input('total','Total del movimiento con IVA','number')+
+ '<label>Tipo<select name="type"><option>Cobro</option><option>Gasto</option></select></label>'+input('date','Fecha real del cobro o de la factura','date',true,'')+input('concept','Concepto')+input('party','Cliente o proveedor')+input('reference','Factura / referencia del pago')+
+ input('total','Total del movimiento con IVA','number')+
+ '<label>Tipo de IVA comprobado en la factura<select id="finance-vat-rate"><option value="">Indicar manualmente</option><option value="21">21 %</option><option value="10">10 %</option><option value="4">4 %</option><option value="0">0 %</option></select></label>'+
+ input('base','Base del movimiento sin IVA','number')+input('vat','IVA del movimiento','number')+
  '<label>Trabajo (opcional)<select name="jobId"><option value="">Sin vincular</option>'+data.jobOptions.map(x=>'<option value="'+h(x.id)+'">'+h(x.concept)+'</option>').join('')+'</select></label>'+
  '<label>Sustituye gasto fijo (solo gastos)<select name="fixedId"><option value="">No: gasto adicional</option>'+data.fixedOptions.map(x=>'<option value="'+h(x.id)+'">'+h(x.concept)+'</option>').join('')+'</select></label>'+
  input('fixedMonth','Mes del gasto fijo (solo si sustituye previsión)','month',false)+
  '<label>Evidencia / enlace / confirmación<textarea name="evidence" required maxlength="2000"></textarea></label></div>'+
- '<p>Si sustituye un gasto fijo, introduce el total real consolidado de ese concepto y mes. El sistema lo reparte por días. No registres además el mismo gasto como gasto adicional.</p>'+
- '<label><input type="checkbox" name="confirmed" required> He comprobado importes, fecha y que no está ya registrado.</label><p><button class="button" type="submit">Guardar movimiento</button></p></form></details></section>':'')+
+ '<p>Si seleccionas un porcentaje de IVA, se calcula una propuesta de base e impuesto a partir del total. <strong>Comprueba que coincide con la factura</strong>, especialmente si incluye distintos tipos de IVA. Si sustituye un gasto fijo, introduce el total real consolidado del concepto y mes. No registres el mismo gasto dos veces.</p>'+
+ '<label><input type="checkbox" name="confirmed" required> He comprobado documento, fecha real de pago/factura, importe y que no existe duplicado.</label><p><button class="button" type="submit">Guardar movimiento</button></p></form></details></section>':'')+
  '<section class="panel"><details '+(data.warnings.length?'open':'')+'><summary>Incidencias de datos ('+data.warnings.length+')</summary><p>Estos avisos pueden pertenecer a otros periodos; no se asignan fechas por suposición.</p><ul>'+data.warnings.map(w=>'<li><strong>'+h(w.concept)+'</strong>: '+h(w.reason)+'</li>').join('')+'</ul></details></section>'+
  '<section class="panel"><details><summary>Detalle de movimientos reales del periodo</summary><div class="finance-scroll"><table class="finance-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Base sin IVA</th><th>Referencia</th></tr></thead><tbody>'+data.events.map(e=>'<tr><td>'+h(e.date)+'</td><td>'+h(e.type)+'</td><td>'+h(e.concept)+'</td><td>'+money(e.base)+'</td><td>'+h(e.reference)+'</td></tr>').join('')+'</tbody></table></div></details></section>');
  document.querySelector('#finance-filter').onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{await refresh(Object.fromEntries(new FormData(e.target)));}catch(err){toast(err.message,true);}finally{b.disabled=false;}};
- const form=document.querySelector('#finance-entry');if(form)form.onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;const fields=Object.fromEntries(new FormData(form));for(const k of ['base','vat','total'])fields[k]=Number(fields[k]);fields.operationId=operationId;try{await api('/admin/finance','POST',fields);operationId=crypto.randomUUID();form.reset();toast('Movimiento guardado; ninguna factura modificada.');await refresh({from:data.from,to:data.to,group:data.group});}catch(err){toast(err.message,true);}finally{b.disabled=false;}};
+ const form=document.querySelector('#finance-entry');
+ if(form){
+  const rate=document.querySelector('#finance-vat-rate');
+  const suggestTax=()=>{if(rate.value==='')return;const total=Number(form.elements.total.value);
+   if(!Number.isFinite(total)||total<=0)return;
+   const base=Math.round((total/(1+Number(rate.value)/100))*100)/100;
+   form.elements.base.value=base.toFixed(2);form.elements.vat.value=(Math.round(total*100)/100-base).toFixed(2);
+  };
+  rate.addEventListener('change',suggestTax);form.elements.total.addEventListener('input',suggestTax);
+ }
+ document.querySelectorAll('[data-reconcile-job]').forEach(button=>button.addEventListener('click',()=>{
+  if(!form)return;const item=data.crm.toReconcile.find(x=>x.id===button.dataset.reconcileJob);if(!item)return;
+  form.closest('details').open=true;form.elements.type.value='Cobro';form.elements.jobId.value=item.id;
+  form.elements.concept.value='Abono de '+item.concept;
+  form.elements.party.value='';form.elements.reference.value=item.invoice||'';
+  form.elements.date.value='';form.elements.total.value='';form.elements.base.value='';form.elements.vat.value='';
+  form.elements.evidence.value='';form.elements.fixedId.value='';form.elements.fixedMonth.value='';
+  document.querySelector('#finance-vat-rate').value='';
+  form.elements.confirmed.checked=false;
+  form.scrollIntoView({behavior:'smooth',block:'start'});form.elements.date.focus();
+ }));
+ if(form)form.onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;const fields=Object.fromEntries(new FormData(form));for(const k of ['base','vat','total'])fields[k]=Number(fields[k]);fields.operationId=operationId;try{await api('/admin/finance','POST',fields);operationId=crypto.randomUUID();form.reset();toast('Movimiento guardado; ninguna factura modificada.');await refresh({from:data.from,to:data.to,group:data.group});}catch(err){toast(err.message,true);}finally{b.disabled=false;}};
  }
  return refresh();
 }
