@@ -140,3 +140,14 @@
 .finance-period-stat strong{font-size:16px;text-align:right;overflow-wrap:anywhere}
 .finance-period-result strong{font-weight:800}
 .finance-small-print{font-size:13px;color:var(--muted);line-height:1.6}
+
+/* ASSA finanzas: conciliación guiada y costes visibles en el móvil */
+.finance-queue{display:flex;flex-direction:column;gap:10px;margin:12px 0}
+.finance-queue-item{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px;border:1px solid #dce5ec;border-radius:12px;background:#fafcfd;overflow-wrap:anywhere}
+.finance-queue-item>div{flex:1;min-width:0}
+.finance-queue-item strong{line-height:1.35}
+.finance-queue-item p{margin:5px 0 0;color:#56697a;font-size:14px;line-height:1.45}
+.finance-queue-item .button{flex-shrink:0;white-space:normal}
+#finance-entry{scroll-margin-top:180px}
+#finance-entry [name="evidence"]{min-height:84px;resize:vertical}
+@media(max-width:640px){.finance-queue-item{flex-direction:column;align-items:stretch}.finance-queue-item .button{width:100%}}
