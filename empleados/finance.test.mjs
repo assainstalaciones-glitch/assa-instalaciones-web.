@@ -10,9 +10,32 @@ test('Suma solo cada cobro parcial en su fecha, no la factura entera',()=>{
  assert.equal(report(m).totals.collected,500);
  assert.equal(report(m,[],{from:'2026-10-31'}).totals.collected,1000);
 });
-test('La fecha de confirmación del portal no se usa como fecha bancaria',()=>{
+test('Los cobros del CRM aparecen como cobrados pero no se asignan a un mes sin fecha bancaria',()=>{
  const d=buildFinance([],[],[{id:'job',fields:{'Trabajo / referencia':'Trabajo','Importe cobrado':605,'Fecha confirmación cobro (portal)':'2026-11-10'}}],{from:'2026-11-01',to:today,today});
- assert.equal(d.totals.collected,0);assert.equal(d.warnings.length,1);
+ assert.equal(d.totals.collected,0);
+ assert.equal(d.crm.totals.paid,605);
+ assert.equal(d.crm.missingPaymentDates,1);
+ assert.equal(d.crm.pending.length,0);
+ assert.equal(d.warnings.length,0);
+});
+test('Cobros completos, parciales y deudas facturadas aparecen por separado sin duplicarse',()=>{
+ const jobs=[
+  {id:'full',fields:{'Trabajo / referencia':'Pagado','Importe total':242,'Importe cobrado':242,'Ref. factura':'058-26','Estado':'Terminado','Estado cobro':'Cobrado'}},
+  {id:'partial',fields:{'Trabajo / referencia':'Termo','Importe total':568.70,'Importe cobrado':284.35,'Ref. factura':'079-26','Estado':'Terminado','Estado cobro':'Parcial'}},
+  {id:'pending',fields:{'Trabajo / referencia':'Caldera','Importe total':1490,'Importe cobrado':0,'Ref. factura':'075-26','Estado':'Pendiente de cobro','Estado cobro':'Pendiente'}},
+  {id:'partial2',fields:{'Trabajo / referencia':'TSS','Importe total':2190.10,'Importe cobrado':834.90,'Ref. factura':'057-26','Estado':'Pendiente de cobro'}},
+  {id:'budget',fields:{'Trabajo / referencia':'Presupuesto sin aceptar','Importe total':4000,'Ref. factura':'','Estado':'Presupuesto enviado','Estado cobro':'Pendiente'}},
+  {id:'cancel',fields:{'Trabajo / referencia':'Cancelado','Importe total':3000,'Ref. factura':'100-26','Estado':'Cancelado','Estado cobro':'Pendiente'}},
+  {id:'old',fields:{'Trabajo / referencia':'Archivo antiguo','Importe total':1700,'Ref. factura':'011-21'}},
+ ];
+ const d=buildFinance([],[],jobs,{from:'2026-11-01',to:today,today});
+ assert.equal(d.crm.paid.length,3);
+ assert.equal(d.crm.pending.length,3);
+ assert.equal(d.crm.totals.paid,1361.25);
+ assert.equal(d.crm.totals.pending,3129.55);
+ assert.equal(d.totals.collected,0);
+ assert.deepEqual(d.crm.pending.map(x=>x.concept).sort(),['Caldera','TSS','Termo']);
+ assert.equal(d.warnings.length,0);
 });
 test('Fijos prorrateados por días y reemplazados por el real sin duplicar',()=>{
  assert.equal(report([],fixed).totals.expenses,160);

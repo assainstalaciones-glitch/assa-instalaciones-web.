@@ -695,7 +695,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   if(p==='/api/admin/finance'&&['GET','POST'].includes(method)){
     reqAdmin(user);
     if(method==='POST'&&user.username!==ROOTUSER)throw failure(403,'Solo la cuenta principal puede registrar movimientos.');
-    const financeJobFields=[F.job.ref,F.job.name,F.job.state,F.job.collected,F.job.invoiceRef,F.job.total];
+    const financeJobFields=[F.job.ref,F.job.name,F.job.state,F.job.collected,F.job.invoiceRef,F.job.total,F.job.paymentState];
     const [movements,fixed,jobs]=await Promise.all([list('finance',LEDGER_FIELDS,10000),list('fixedCosts',FIXED_FIELDS,1000),list('jobs',financeJobFields,3000)]);
     const today=dateMadrid();
     if(method==='GET'){

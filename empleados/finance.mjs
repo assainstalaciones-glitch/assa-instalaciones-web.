@@ -45,10 +45,31 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
   if(f['Gasto fijo ID'])continue;
   if(f['Fecha movimiento']>=from&&f['Fecha movimiento']<=to)events.push({id:r.id,date:f['Fecha movimiento'],concept:label(f),type:f.Tipo,base:cents(f['Base sin IVA']),vat:cents(f['IVA importe']),total:cents(f['Total con IVA']),estimated:false,reference:f['Referencia documento']});
  }
- for(const j of jobs){const f=j.fields||{};if(isTestRecord(f))continue;const stored=amount(f['Importe cobrado'])?cents(f['Importe cobrado']):0,entered=paidByJob.get(j.id)||0;
-  if(stored>entered)warnings.push({id:j.id,concept:f['Trabajo / referencia']||j.id,reason:'Cobro acumulado sin desglose completo de fechas: '+((stored-entered)/100).toFixed(2)+' € con IVA. No se asigna a este periodo.'});
-  else if(entered>stored)warnings.push({id:j.id,concept:f['Trabajo / referencia']||j.id,reason:'El auxiliar supera el cobro acumulado del trabajo; conciliar sin modificar facturas.'});
+ // Estado de cobros por trabajo: vista histórica (IVA incluido) separada del flujo por fechas.
+ // No convertir fecha de ejecución o confirmación en fecha bancaria.
+ const crmPaid=[],crmPending=[];let missingPaymentDates=0;
+ const proposalStatuses=new Set(['Pendiente de visita','Presupuesto pendiente','Presupuesto enviado','Aceptado / Programado','No aceptado / Sin respuesta','Cancelado']);
+ for(const j of jobs){
+  const f=j.fields||{},status=String(f['Estado']||''),paymentStatus=String(f['Estado cobro']||'');
+  if(isTestRecord(f)||status==='Cancelado'||status==='No aceptado / Sin respuesta')continue;
+  const paid=amount(f['Importe cobrado'])?cents(f['Importe cobrado']):0;
+  const total=amount(f['Importe total'])?cents(f['Importe total']):null;
+  const entered=paidByJob.get(j.id)||0;
+  const concept=f['Trabajo / referencia']||j.id,invoice=String(f['Ref. factura']||'').trim();
+  if(paid>0){
+   crmPaid.push({id:j.id,concept,invoice,paid:paid/100,remaining:total===null?null:Math.max(0,total-paid)/100,partial:total!==null&&paid<total});
+   if(paid>entered)missingPaymentDates++;
+  }
+  // Deuda real sólo si hay factura y estado de cobro/trabajo pertinente; nunca presupuestos no ejecutados.
+  const due=total!==null&&total>paid&&!!invoice&&(
+   status==='Pendiente de cobro'||status==='Facturado'||
+   (['Pendiente','Parcial'].includes(paymentStatus)&&!proposalStatuses.has(status)));
+  if(due)crmPending.push({id:j.id,concept,invoice,paid:paid/100,remaining:(total-paid)/100,status:paid>0?'Parcial':'Pendiente'});
+  if(entered>paid)warnings.push({id:j.id,concept,reason:'Los movimientos fechados superan el importe cobrado de la ficha; conciliar.'});
+  if(total!==null&&paid>total)warnings.push({id:j.id,concept,reason:'El importe cobrado supera el total del trabajo; revisar.'});
+  if(paymentStatus==='Cobrado'&&paid===0&&total>0)warnings.push({id:j.id,concept,reason:'Estado Cobrado sin importe cobrado; revisar.'});
  }
+ crmPaid.sort((a,b)=>b.paid-a.paid);crmPending.sort((a,b)=>b.remaining-a.remaining);
  const months=new Set();for(let d=from;d<=to;d=next(d))months.add(d.slice(0,7));
  for(const x of fixed){const f=x.fields||{};if(!f['Incluir en punto equilibrio'])continue;
   for(const month of months){
@@ -69,8 +90,9 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
  const sum=k=>Math.round(rows.reduce((s,r)=>s+cents(r[k]),0))/100;
  const uniqueWarnings=warnings.filter(w=>{const k=JSON.stringify(w);if(seen.has(k))return false;seen.add(k);return true;});
  return {from,to,group,rows,totals:{collected:sum('collected'),expenses:sum('expenses'),estimated:sum('estimated'),result:sum('result')},warnings:uniqueWarnings,
+ crm:{paid:crmPaid,pending:crmPending,totals:{paid:Math.round(crmPaid.reduce((n,x)=>n+cents(x.paid),0))/100,pending:Math.round(crmPending.reduce((n,x)=>n+cents(x.remaining),0))/100},missingPaymentDates},
  events:events.filter(e=>!e.estimated).map(e=>({...e,base:e.base/100,vat:e.vat===null?null:e.vat/100,total:e.total===null?null:e.total/100})),
  fixedOptions:fixed.map(x=>({id:x.id,concept:label(x.fields),monthly:x.fields['Coste mensual equivalente']??null})),
  jobOptions:jobs.filter(j=>!isTestRecord(j.fields||{})&&(j.fields?.['Estado']||j.fields?.['Importe cobrado']>0)).map(j=>({id:j.id,concept:j.fields['Trabajo / referencia']||j.id})),
- notice:'Importes sin IVA. Resultado sobre cobros menos gastos registrados y previsiones fijas; no es beneficio contable ni saldo bancario. Las facturas de gasto se registran al recibirlas, aunque no estén pagadas. Cobros históricos sin fecha quedan fuera. Las previsiones usan la ficha fija actual, no un histórico contable.'};
+ notice:'Importes sin IVA. Resultado sobre cobros menos gastos registrados y previsiones fijas; no es beneficio contable ni saldo bancario. Las facturas de gasto se registran al recibirlas, aunque no estén pagadas. Cobros de trabajos sin fecha se presentan en el estado general, pero no se asignan al periodo. Las previsiones usan la ficha fija actual, no un histórico contable.'};
 }
