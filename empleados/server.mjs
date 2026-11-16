@@ -1,3 +1,4 @@
+import { LEDGER_FIELDS, FIXED_FIELDS, buildFinance, validateMovement, duplicateKey } from './finance.mjs';
 import { economicsView } from './economics.mjs';
 import http from 'node:http';
 import { reportVersion, visitMarker, stripVisitMarker, writeKeys } from './reliability.mjs';
@@ -22,7 +23,7 @@ import { buildReconciliationView } from './reconciliation-view.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 10000);
 const BASE = process.env.AIRTABLE_BASE_ID || 'appdHOIMfkGPduA83';
-const T = { partners:'tblXXBlGHp5UByNj4', jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx', reconciliationDocs:'tblW53PDguHrrOIs1', reconciliation:'tblMvunG5HhUA1qia', freeAgenda:'tblKc1Tvz45Fu5J9b' };
+const T = { finance:'tbl5jKkC9sM6BkRvX', fixedCosts:'tblDQafasXbGd9ijP', partners:'tblXXBlGHp5UByNj4', jobs:'tblsVLKBSafEEiUlI', clients:'tblGzayqdlCpz90vx', visits:'tblqkKyk1HvE3rFKw', reports:'tblprtqasdBxVVsNx', users:'tblZURy4PjvmL1Kr0', orders:'tblvZgkNh2cX1bTNx', reconciliationDocs:'tblW53PDguHrrOIs1', reconciliation:'tblMvunG5HhUA1qia', freeAgenda:'tblKc1Tvz45Fu5J9b' };
 const TOKEN = (process.env.AIRTABLE_TOKEN || '').trim();
 const SECRET = process.env.SESSION_SECRET || '';
 const ROOTUSER = (process.env.BOOTSTRAP_USER || '').trim().toLowerCase();
@@ -690,6 +691,37 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       notice:'Revisión documental guardada en Airtable. Ninguna factura, cliente ni cobro se ha modificado.'});
   }
 
+
+  if(p==='/api/admin/finance'&&['GET','POST'].includes(method)){
+    reqAdmin(user);
+    if(method==='POST'&&user.username!==ROOTUSER)throw failure(403,'Solo la cuenta principal puede registrar movimientos.');
+    const financeJobFields=[F.job.ref,F.job.name,F.job.state,F.job.collected,F.job.invoiceRef,F.job.total];
+    const [movements,fixed,jobs]=await Promise.all([list('finance',LEDGER_FIELDS,10000),list('fixedCosts',FIXED_FIELDS,1000),list('jobs',financeJobFields,3000)]);
+    const today=dateMadrid();
+    if(method==='GET'){
+      const from=url.searchParams.get('from')||today.slice(0,7)+'-01',to=url.searchParams.get('to')||today,group=url.searchParams.get('group')||'month';
+      return json(res,200,buildFinance(movements,fixed,jobs,{from,to,group,today}));
+    }
+    const b=await requestBody(req),fields=validateMovement(b,today);
+    const old=movements.find(r=>r.fields['Operación ID']===b.operationId);
+    if(old){
+      if(Object.keys(fields).some(k=>(old.fields[k]??'')!==fields[k]))throw failure(409,'Ese intento ya existe con otros datos. Reabre el formulario.');
+      return json(res,200,{ok:true,id:old.id,unchanged:true});
+    }
+    const active=movements.filter(r=>r.fields.Estado!=='Anulado');
+    if(active.some(r=>duplicateKey(r.fields)===duplicateKey(fields)))throw failure(409,'Existe un posible duplicado de esta factura o pago. Revisa el auxiliar antes de continuar.');
+    if(b.fixedId){
+      if(!fixed.some(r=>r.id===b.fixedId&&r.fields['Incluir en punto equilibrio']))throw failure(400,'Gasto fijo no válido.');
+      if(active.some(r=>r.fields['Gasto fijo ID']===b.fixedId&&r.fields['Periodo fijo']===b.fixedMonth))throw failure(409,'Ya hay un gasto real para ese concepto y mes; revisa el registro existente.');
+    }
+    if(b.jobId&&!jobs.some(r=>r.id===b.jobId&&!/^PRUEBA|^TEST|^SIMULACI/i.test(r.fields[F.job.ref]||'')))throw failure(400,'Trabajo no válido.');
+    fields['Creado por']=user.username;fields['Fecha registro']=new Date().toISOString();
+    const saved=await create('finance',fields);
+    const verified=await getOne('finance',saved.id);
+    if(Object.keys(fields).some(k=>k!=='Fecha registro'&&(verified.fields[k]??'')!==fields[k]))throw failure(502,'Movimiento guardado pendiente de comprobar. Reintenta con el mismo formulario.');
+    return json(res,201,{ok:true,id:saved.id});
+  }
+
   if(p==='/api/admin/dashboard'&&method==='GET'){
     reqAdmin(user);
     const dashFields=[F.job.ref,F.job.name,F.job.address,F.job.state,F.job.total,F.job.client,F.job.desc,
@@ -876,6 +908,7 @@ const writingJobs=new Set();
 const server=http.createServer(async(req,res)=>{let held=[];try{
   const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);
   const keys=writeKeys(url.pathname,req.method);
+  if(url.pathname==='/api/admin/finance'&&req.method==='POST')keys.push('finance-ledger');
   if(keys.some(k=>writingJobs.has(k)))throw failure(409,'Este registro se está guardando. Espera un momento antes de reintentar.');
   held=keys;req.portalLocks=held;for(const key of held)writingJobs.add(key);
   if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'password-reset-v15'});
