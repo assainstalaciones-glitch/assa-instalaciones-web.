@@ -694,8 +694,8 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
 
   if(p==='/api/admin/finance'&&['GET','POST'].includes(method)){
     reqAdmin(user);
-    if(method==='POST'&&user.username!==ROOTUSER)throw failure(403,'Solo la cuenta principal puede registrar movimientos.');
-    const financeJobFields=[F.job.ref,F.job.name,F.job.state,F.job.collected,F.job.invoiceRef,F.job.total,F.job.paymentState];
+    if(user.username!==ROOTUSER)throw failure(403,'Solo la cuenta principal puede consultar o registrar los datos financieros.');
+    const financeJobFields=[F.job.ref,F.job.name,F.job.state,F.job.collected,F.job.invoiceRef,F.job.total,F.job.paymentState,'Fecha realizado','Coste material / equipos','Otros costes directos','Horas reales verificadas (operario-h)','Coste de mano de obra imputado','Venta neta sin IVA','Estado económico validado','Servicio'];
     const [movements,fixed,jobs]=await Promise.all([list('finance',LEDGER_FIELDS,10000),list('fixedCosts',FIXED_FIELDS,1000),list('jobs',financeJobFields,3000)]);
     const today=dateMadrid();
     if(method==='GET'){
@@ -703,6 +703,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       return json(res,200,buildFinance(movements,fixed,jobs,{from,to,group,today}));
     }
     const b=await requestBody(req),fields=validateMovement(b,today);
+    if(![true,'on'].includes(b.confirmed))throw failure(400,'Confirma que has revisado fecha, importe y evidencia antes de guardar.');
     const old=movements.find(r=>r.fields['Operación ID']===b.operationId);
     if(old){
       if(Object.keys(fields).some(k=>(old.fields[k]??'')!==fields[k]))throw failure(409,'Ese intento ya existe con otros datos. Reabre el formulario.');
@@ -714,7 +715,16 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       if(!fixed.some(r=>r.id===b.fixedId&&r.fields['Incluir en punto equilibrio']))throw failure(400,'Gasto fijo no válido.');
       if(active.some(r=>r.fields['Gasto fijo ID']===b.fixedId&&r.fields['Periodo fijo']===b.fixedMonth))throw failure(409,'Ya hay un gasto real para ese concepto y mes; revisa el registro existente.');
     }
-    if(b.jobId&&!jobs.some(r=>r.id===b.jobId&&!/^PRUEBA|^TEST|^SIMULACI/i.test(r.fields[F.job.ref]||'')))throw failure(400,'Trabajo no válido.');
+    if(b.jobId){
+      const matched=jobs.find(r=>r.id===b.jobId&&!/^PRUEBA|^TEST|^SIMULACI/i.test(r.fields[F.job.ref]||''));
+      if(!matched)throw failure(400,'Trabajo no válido.');
+      if(b.type==='Cobro'){
+        const collected=Number(matched.fields[F.job.collected]||0);
+        const linked=active.filter(r=>r.fields.Tipo==='Cobro'&&r.fields['Trabajo ID']===b.jobId).reduce((sum,r)=>sum+Number(r.fields['Total con IVA']||0),0);
+        // Nunca atribuir más ingresos fechados que el total reconocido en la ficha.
+        if(!Number.isFinite(collected)||Number((linked+b.total-collected).toFixed(2))>0.009)throw failure(409,'El cobro fechado supera lo cobrado según TRABAJOS. Revisa la ficha y los pagos ya conciliados antes de guardar.');
+      }
+    }
     fields['Creado por']=user.username;fields['Fecha registro']=new Date().toISOString();
     const saved=await create('finance',fields);
     const verified=await getOne('finance',saved.id);
