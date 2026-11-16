@@ -52,7 +52,7 @@ test('Finanzas: autorización, reintentos y escrituras limitadas al auxiliar',as
  assert.equal((await call('samuel','POST',excessive)).status,409);
  assert.equal(writes.length,1);
  const costsPath='/api/admin/finance/job-costs';
- const costInput={jobId,material:100,other:0,hours:6,hourRate:20,saleNet:1500,
+ const costInput={jobId,material:100,other:0,hours:6,hourRate:20,saleNet:50,
   evidence:'Albarán Saltoki 1626935, parte operario firmado y factura del trabajo',
   expectedRevision:'',confirmed:true,operationId:'d'.repeat(36)};
  assert.equal((await call('saul','POST',costInput,costsPath)).status,403);
@@ -65,7 +65,7 @@ test('Finanzas: autorización, reintentos y escrituras limitadas al auxiliar',as
  assert.equal(job.fields['Otros costes directos'],0);
  assert.equal(job.fields['Horas reales verificadas (operario-h)'],6);
  assert.equal(job.fields['Coste de mano de obra imputado'],120);
- assert.equal(job.fields['Venta neta sin IVA'],1500);
+ assert.equal(job.fields['Venta neta sin IVA'],50);
  assert.equal(job.fields['Estado económico validado'],'Parcial orientativo');
  assert.match(job.fields['Evidencia y pendientes económicos'],/Saltoki 1626935/);
  assert.equal((await call('samuel','POST',costInput,costsPath)).result.unchanged,true);
