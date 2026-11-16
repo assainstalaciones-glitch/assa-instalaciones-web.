@@ -692,10 +692,66 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   }
 
 
+  if(p==='/api/admin/finance/job-costs'&&method==='POST'){
+    reqAdmin(user);
+    if(user.username!==ROOTUSER)throw failure(403,'Solo la cuenta principal puede revisar costes.');
+    const b=await requestBody(req);
+    if(!validId(b.jobId))throw failure(400,'Selecciona un trabajo válido.');
+    if(![true,'on'].includes(b.confirmed))throw failure(400,'Confirma que has revisado la evidencia de los costes.');
+    if(typeof b.evidence!=='string'||b.evidence.trim().length<12||b.evidence.length>1800)
+      throw failure(400,'Indica el documento, albarán o referencia y qué costes has comprobado.');
+    if(!/^[a-f0-9-]{36}$/.test(b.operationId||''))throw failure(400,'Identificador inválido.');
+    const old=await getOne('jobs',b.jobId),f=old.fields||{};
+    if(/^PRUEBA|^TEST|^SIMULACI/i.test(f[F.job.ref]||''))throw failure(400,'No se pueden registrar costes sobre pruebas.');
+    const marker='[FINANZAS '+b.operationId+']';
+    if(String(f['Evidencia y pendientes económicos']||'').includes(marker))
+      return json(res,200,{ok:true,unchanged:true,id:b.jobId});
+    if(String(f['Última revisión económica']||'')!==String(b.expectedRevision||''))
+      throw failure(409,'La revisión económica cambió desde que abriste el formulario. Actualiza antes de registrar.');
+    if(String(f['Estado económico validado']||'')==='Completo documentado')
+      throw failure(409,'Este trabajo ya figura como completo documentado. Revisa su auditoría antes de cambiarlo.');
+    const specs=[['saleNet','Venta neta sin IVA'],['material','Coste material / equipos'],['other','Otros costes directos'],['hours','Horas reales verificadas (operario-h)']];
+    const changes={};
+    for(const [key,field] of specs){
+      if(b[key]===null||b[key]===undefined||b[key]==='')continue;
+      const value=Number(b[key]);
+      if(!Number.isFinite(value)||value<0||value>1000000||Math.round(value*100)!==value*100 && Math.abs(Math.round(value*100)-value*100)>1e-7)
+        throw failure(400,'Los importes deben tener máximo dos decimales y no ser negativos.');
+      if(f[field]!==undefined&&Math.abs(Number(f[field])-value)>0.001)
+        throw failure(409,'Ya existe un coste para '+field+'. No lo sobrescribas desde el panel sin revisar la auditoría.');
+      changes[field]=value;
+    }
+    if(Object.keys(changes).length===0)throw failure(400,'Completa al menos un coste o importe de venta que hayas verificado.');
+    if(changes['Venta neta sin IVA']!==undefined&&Number(f[F.job.total]||0)>0&&changes['Venta neta sin IVA']>Number(f[F.job.total])+0.01)
+      throw failure(400,'La venta neta supera el total del trabajo. Comprueba la base de la factura.');
+    if(changes['Horas reales verificadas (operario-h)']!==undefined){
+      const rate=Number(b.hourRate);
+      if(!Number.isFinite(rate)||rate<=0||rate>200)throw failure(400,'Confirma un coste por hora válido.');
+      const labor=Math.round(changes['Horas reales verificadas (operario-h)']*rate*100)/100;
+      if(f['Coste de mano de obra imputado']!==undefined&&Math.abs(Number(f['Coste de mano de obra imputado'])-labor)>0.001)
+        throw failure(409,'La mano de obra ya tiene un coste distinto registrado. Revisar antes de sobrescribir.');
+      changes['Coste de mano de obra imputado']=labor;
+    }else if(b.hourRate!==undefined&&b.hourRate!==''&&b.hourRate!==null)
+      throw failure(400,'Indica horas verificadas o elimina el coste por hora.');
+    const stamp=new Date().toISOString();
+    const additions=Object.keys(changes).map(x=>x+': '+changes[x]).join('; ')+
+      (changes['Horas reales verificadas (operario-h)']!==undefined?'; coste hora confirmado: '+b.hourRate+' €/h':'');
+    const note=String(f['Evidencia y pendientes económicos']||'').trim()+
+      '\n'+marker+' '+stamp+' · Revisado por '+user.username+' · '+additions+' · Fuente: '+b.evidence.trim();
+    if(note.length>9000)throw failure(409,'El historial de evidencias está demasiado largo; archívalo antes de añadir más.');
+    Object.assign(changes,{'Evidencia y pendientes económicos':note.trim(),
+      'Última revisión económica':stamp,'Estado económico validado':'Parcial orientativo'});
+    await patch('jobs',b.jobId,changes);
+    const verify=await getOne('jobs',b.jobId);
+    if(Object.entries(changes).some(([key,val])=>key!=='Última revisión económica'&&verify.fields?.[key]!==val))
+      throw failure(502,'Costes guardados pendientes de comprobar. No repitas el envío sin revisar la ficha.');
+    return json(res,200,{ok:true,id:b.jobId,notice:'Solo se han actualizado costes del trabajo; ninguna factura se ha modificado.'});
+  }
+
   if(p==='/api/admin/finance'&&['GET','POST'].includes(method)){
     reqAdmin(user);
     if(user.username!==ROOTUSER)throw failure(403,'Solo la cuenta principal puede consultar o registrar los datos financieros.');
-    const financeJobFields=[F.job.ref,F.job.name,F.job.state,F.job.collected,F.job.invoiceRef,F.job.total,F.job.paymentState,'Fecha realizado','Coste material / equipos','Otros costes directos','Horas reales verificadas (operario-h)','Coste de mano de obra imputado','Venta neta sin IVA','Estado económico validado','Servicio'];
+    const financeJobFields=[F.job.ref,F.job.name,F.job.state,F.job.collected,F.job.invoiceRef,F.job.total,F.job.paymentState,'Fecha realizado','Coste material / equipos','Otros costes directos','Horas reales verificadas (operario-h)','Coste de mano de obra imputado','Venta neta sin IVA','Estado económico validado','Última revisión económica','Servicio'];
     const [movements,fixed,jobs]=await Promise.all([list('finance',LEDGER_FIELDS,10000),list('fixedCosts',FIXED_FIELDS,1000),list('jobs',financeJobFields,3000)]);
     const today=dateMadrid();
     if(method==='GET'){
@@ -919,6 +975,7 @@ const server=http.createServer(async(req,res)=>{let held=[];try{
   const url=new URL(req.url,`https://${req.headers.host||'localhost'}`);
   const keys=writeKeys(url.pathname,req.method);
   if(url.pathname==='/api/admin/finance'&&req.method==='POST')keys.push('finance-ledger');
+  if(url.pathname==='/api/admin/finance/job-costs'&&req.method==='POST')keys.push('finance-costs');
   if(keys.some(k=>writingJobs.has(k)))throw failure(409,'Este registro se está guardando. Espera un momento antes de reintentar.');
   held=keys;req.portalLocks=held;for(const key of held)writingJobs.add(key);
   if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'password-reset-v15'});

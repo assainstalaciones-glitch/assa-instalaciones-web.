@@ -105,7 +105,7 @@ test('La cola de conciliación evita asociar cobros a fechas supuestas y disminu
 });
 test('La información incompleta de materiales y horas se muestra como pendiente, no como beneficio',()=>{
  const jobs=[
-  {id:'complete',fields:{'Trabajo / referencia':'Completo','Estado':'Terminado','Fecha realizado':'2026-11-10','Coste material / equipos':0,'Otros costes directos':0,'Horas reales verificadas (operario-h)':2}},
+  {id:'complete',fields:{'Trabajo / referencia':'Completo','Estado':'Terminado','Fecha realizado':'2026-11-10','Venta neta sin IVA':500,'Coste material / equipos':0,'Otros costes directos':0,'Horas reales verificadas (operario-h)':2}},
   {id:'incomplete',fields:{'Trabajo / referencia':'Sin costes','Estado':'Terminado','Fecha realizado':'2026-11-10','Importe total':250}},
   {id:'old',fields:{'Trabajo / referencia':'Antiguo','Estado':'Terminado','Fecha realizado':'2026-10-10'}}
  ];

@@ -1,5 +1,5 @@
 export function financeScreen({layout,api,h,toast,today,canWrite}){
- let data=null,operationId=crypto.randomUUID();
+ let data=null,operationId=crypto.randomUUID(),costOperationId=crypto.randomUUID();
  const money=n=>Number(n).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
  const initial={from:today.slice(0,7)+'-01',to:today,group:'month'};
  function input(name,label,type='text',required=true,value=''){return '<label>'+label+'<input name="'+name+'" type="'+type+'" '+(required?'required ':'')+'value="'+h(value)+'" '+(type==='number'?'min="0" step="0.01"':'')+'></label>';}
@@ -41,10 +41,24 @@ export function financeScreen({layout,api,h,toast,today,canWrite}){
  '<section class="panel"><h2>Calidad de la información</h2>'+
  '<p><strong>'+data.quality.costCoverage.complete+' de '+data.quality.costCoverage.jobs+' trabajos terminados en este periodo</strong> tienen campos de materiales, otros costes y horas o mano de obra cumplimentados. Sin ellos no es posible calcular el margen real por trabajo.</p>'+
  (data.quality.costCoverage.missing.length?'<details><summary>Trabajos con costes por completar ('+data.quality.costCoverage.missing.length+(data.quality.costCoverage.jobs-data.quality.costCoverage.complete>40?'+':'')+')</summary><ul>'+
- data.quality.costCoverage.missing.map(x=>'<li>'+h(x.concept)+'</li>').join('')+'</ul></details>':'')+
+ data.quality.costCoverage.missing.map(x=>'<li>'+h(x.concept)+' '+(canWrite?'<button type="button" class="button light small" data-cost-job="'+h(x.id)+'">Revisar costes</button>':'')+'</li>').join('')+'</ul></details>':'')+
  '<details><summary>Gastos fijos registrados ('+data.quality.fixedDetails.length+')</summary><p>Importes mensuales equivalentes sin IVA. Una previsión no acredita una factura pagada. No duplicar nóminas y coste horario en el resultado de empresa.</p>'+
  '<div class="finance-queue">'+data.quality.fixedDetails.map(x=>'<div class="finance-queue-item"><span>'+h(x.concept)+' · '+h(x.status)+'</span><strong>'+(x.monthly===null?'Sin importe':money(x.monthly)+'/mes')+'</strong></div>').join('')+'</div></details>'+
  '<div class="actions"><button type="button" class="button light small" data-nav="reconciliation">Ver conciliación de facturas</button></div></section>'+
+ (canWrite&&data.quality.costCoverage.missing.length?'<section class="panel"><details id="finance-costs-details"><summary>Registrar costes directos comprobados</summary>'+
+ '<p>Solo para trabajos ejecutados con fecha en el periodo seleccionado. No se modifican facturas. No rellenes con cero los importes desconocidos. Si ya existe un coste distinto, el sistema bloqueará su sobrescritura.</p>'+
+ '<form id="finance-cost-entry"><div class="finance-grid">'+
+ '<label>Trabajo<select name="jobId" required><option value="">Elige trabajo</option>'+data.quality.costCoverage.missing.map(x=>'<option value="'+h(x.id)+'">'+h(x.concept)+'</option>').join('')+'</select></label>'+
+ input('saleNet','Venta verificada · base sin IVA','number',false)+
+ input('material','Materiales/equipos consumidos · sin IVA','number',false)+
+ input('other','Otros costes directos · sin IVA','number',false)+
+ input('hours','Horas-persona reales verificadas','number',false)+
+ input('hourRate','Coste por hora confirmado (€/hora)','number',false)+
+ '<label>Evidencia: nº factura, albarán, parte o documento de respaldo<textarea name="evidence" required minlength="12" maxlength="1800"></textarea></label>'+
+ '<input type="hidden" name="expectedRevision" value=""></div>'+
+ '<p>Si indicas horas, confirma el coste horario real. La referencia de ASSA es 20 €/h productiva, pero debes comprobar que corresponde al trabajo. No incluyas dos veces salarios como coste directo y gasto fijo al calcular resultados globales.</p>'+
+ '<label><input type="checkbox" name="confirmed" required> He contrastado estos costes con documentos, no son estimaciones ni supuestos.</label>'+
+ '<p><button class="button primary" type="submit">Guardar costes revisados</button></p></form></details></section>':'')+
  (canWrite?'<section class="panel"><details><summary>Registrar un cobro o una factura de gasto</summary><p>Un registro por pago parcial. Introduce solo el importe recibido y su fecha real. Para gastos, usa fecha de factura. No se cambia la factura ni el cobro acumulado del trabajo.</p><form id="finance-entry"><div class="finance-grid">'+
  '<label>Tipo<select name="type"><option>Cobro</option><option>Gasto</option></select></label>'+input('date','Fecha real del cobro o de la factura','date',true,'')+input('concept','Concepto')+input('party','Cliente o proveedor')+input('reference','Factura / referencia del pago')+
  input('total','Total del movimiento con IVA','number')+
@@ -59,6 +73,37 @@ export function financeScreen({layout,api,h,toast,today,canWrite}){
  '<section class="panel"><details '+(data.warnings.length?'open':'')+'><summary>Incidencias de datos ('+data.warnings.length+')</summary><p>Estos avisos pueden pertenecer a otros periodos; no se asignan fechas por suposición.</p><ul>'+data.warnings.map(w=>'<li><strong>'+h(w.concept)+'</strong>: '+h(w.reason)+'</li>').join('')+'</ul></details></section>'+
  '<section class="panel"><details><summary>Detalle de movimientos reales del periodo</summary><div class="finance-scroll"><table class="finance-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Base sin IVA</th><th>Referencia</th></tr></thead><tbody>'+data.events.map(e=>'<tr><td>'+h(e.date)+'</td><td>'+h(e.type)+'</td><td>'+h(e.concept)+'</td><td>'+money(e.base)+'</td><td>'+h(e.reference)+'</td></tr>').join('')+'</tbody></table></div></details></section>');
  document.querySelector('#finance-filter').onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{await refresh(Object.fromEntries(new FormData(e.target)));}catch(err){toast(err.message,true);}finally{b.disabled=false;}};
+ const costForm=document.querySelector('#finance-cost-entry');
+ if(costForm){
+  const pick=()=>{
+   const item=data.quality.costCoverage.missing.find(x=>x.id===costForm.elements.jobId.value);
+   for(const key of ['saleNet','material','other','hours'])costForm.elements[key].value=item?.costs?.[key]??'';
+   costForm.elements.expectedRevision.value=item?.expectedRevision||'';
+   costForm.elements.hourRate.value='';
+   costForm.elements.evidence.value='';
+   costForm.elements.confirmed.checked=false;
+  };
+  costForm.elements.jobId.addEventListener('change',pick);
+  document.querySelectorAll('[data-cost-job]').forEach(button=>button.addEventListener('click',()=>{
+   const details=document.querySelector('#finance-costs-details');details.open=true;
+   costForm.elements.jobId.value=button.dataset.costJob;pick();
+   details.scrollIntoView({behavior:'smooth',block:'start'});
+  }));
+  costForm.addEventListener('submit',async e=>{
+   e.preventDefault();const btn=e.submitter;btn.disabled=true;
+   const b=Object.fromEntries(new FormData(costForm));for(const key of ['saleNet','material','other','hours','hourRate']){
+    if(b[key]==='')delete b[key];else b[key]=Number(b[key]);
+   }
+   b.operationId=costOperationId;
+   try{
+    await api('/admin/finance/job-costs','POST',b);
+    costOperationId=crypto.randomUUID();
+    toast('Costes registrados con evidencia; ninguna factura modificada.');
+    await refresh({from:data.from,to:data.to,group:data.group});
+   }catch(err){toast(err.message,true);}
+   finally{btn.disabled=false;}
+  });
+ }
  const form=document.querySelector('#finance-entry');
  if(form){
   const rate=document.querySelector('#finance-vat-rate');
