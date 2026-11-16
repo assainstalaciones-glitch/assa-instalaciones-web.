@@ -151,3 +151,8 @@
 #finance-entry{scroll-margin-top:180px}
 #finance-entry [name="evidence"]{min-height:84px;resize:vertical}
 @media(max-width:640px){.finance-queue-item{flex-direction:column;align-items:stretch}.finance-queue-item .button{width:100%}}
+
+/* Costes de trabajos: formulario de revisión con evidencia. */
+#finance-cost-entry{scroll-margin-top:170px}
+#finance-cost-entry textarea{min-height:100px;resize:vertical}
+#finance-cost-entry .button{min-width:190px}
