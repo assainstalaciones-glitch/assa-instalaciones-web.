@@ -5,6 +5,8 @@ export function financeScreen({layout,api,h,toast,today,canWrite}){
  function input(name,label,type='text',required=true,value=''){return '<label>'+label+'<input name="'+name+'" type="'+type+'" '+(required?'required ':'')+'value="'+h(value)+'" '+(type==='number'?'min="0" step="0.01"':'')+'></label>';}
  async function refresh(filters=initial){data=await api('/admin/finance?'+new URLSearchParams(filters));render();}
  function render(){
+ const periodLabel=p=>data.group==='month'?new Date(p+'-01T00:00:00Z').toLocaleDateString('es-ES',{month:'long',year:'numeric',timeZone:'UTC'}):(data.group==='week'?'Semana del ':'')+p.split('-').reverse().join('/');
+ const outcome=n=>n===null?'Pendiente de conciliar':money(n);
  layout('<div class="topbar"><div class="titleblock"><span class="eyebrow">Solo administración</span><h1>Cobros y gastos</h1><p>Consulta lo recibido y los gastos de cada periodo.</p></div></div>'+
  '<section class="panel"><form id="finance-filter" class="finance-grid">'+input('from','Desde','date',true,data.from)+input('to','Hasta','date',true,data.to)+
  '<label>Agrupar<select name="group">'+[['day','Días'],['week','Semanas (lunes)'],['month','Meses']].map(([v,t])=>'<option value="'+v+'" '+(data.group===v?'selected':'')+'>'+t+'</option>').join('')+'</select></label><button class="button" type="submit">Consultar</button></form></section>'+
@@ -19,9 +21,18 @@ export function financeScreen({layout,api,h,toast,today,canWrite}){
  (data.crm.pending.map(x=>'<tr><td>'+h(x.concept)+'</td><td>'+money(x.remaining)+'</td><td>'+h(x.status)+'</td><td>'+h(x.invoice)+'</td></tr>').join('')||'<tr><td colspan="4">No hay deudas identificadas con este criterio.</td></tr>')+
  '</tbody></table></div></details>'+
  '<p><strong>'+data.crm.missingPaymentDates+' trabajos cobrados necesitan desglose de fechas.</strong> No se trasladan automáticamente a la tabla por mes, para no inventar cuándo se recibió el dinero.</p></section>'+
-  '<section class="finance-cards">'+[['Cobrado fechado del periodo (sin IVA)',data.totals.collected],['Gastos del periodo (sin IVA)',data.totals.expenses],['Resultado del periodo (sin IVA)',data.totals.result]].map(([name,n])=>'<article class="panel"><h2>'+name+'</h2><strong class="finance-amount">'+money(n)+'</strong></article>').join('')+'</section>'+
- '<section class="panel"><p>'+h(data.notice)+'</p><p><strong>Gastos fijos estimados incluidos: '+money(data.totals.estimated)+'.</strong> Registrar el gasto real con su concepto fijo y mes sustituye la previsión, no la duplica.</p>'+
- '<div class="finance-scroll"><table class="finance-table"><thead><tr><th>Periodo</th><th>Cobrado</th><th>Gastos</th><th>De ellos, estimados</th><th>Resultado</th></tr></thead><tbody>'+data.rows.map(r=>'<tr><td>'+h(r.period)+'</td><td>'+money(r.collected)+'</td><td>'+money(r.expenses)+'</td><td>'+money(r.estimated)+'</td><td>'+money(r.result)+'</td></tr>').join('')+'</tbody></table></div></section>'+
+  '<section class="panel"><h2>Resultado por día, semana o mes</h2>'+
+ (data.crm.unassignedGross>0?'<p class="finance-clarification"><strong>'+money(data.crm.unassignedGross)+' cobrados según trabajos, aún sin fecha de ingreso desglosada (IVA incluido).</strong> No se pueden asignar con seguridad a octubre o noviembre. Por eso el resultado de los periodos aparece pendiente, no como una pérdida ficticia.</p>':'')+
+ '<p>Los ingresos de esta tabla sólo incluyen pagos con fecha real registrada en el auxiliar. Los gastos son bases sin IVA y pueden incluir previsiones. Nunca mezclamos el total cobrado con IVA con el gasto sin IVA.</p>'+
+ '<div class="finance-cards">'+[['Cobros fechados sin IVA',money(data.totals.collected)],['Gastos del periodo sin IVA',money(data.totals.expenses)],['Resultado del periodo',outcome(data.totals.result)]].map(([name,value])=>'<article class="panel"><h2>'+h(name)+'</h2><strong class="finance-amount">'+h(value)+'</strong></article>').join('')+'</div>'+
+ '<p><strong>Gastos fijos previstos incluidos: '+money(data.totals.estimated)+'.</strong> Son importes prorrateados, no necesariamente facturas ya pagadas. Las facturas reales de un gasto fijo sustituyen su previsión para evitar duplicados.</p>'+
+ '<div class="finance-periods">'+data.rows.map(r=>'<article class="finance-period"><h3>'+h(periodLabel(r.period))+'</h3>'+
+ '<div class="finance-period-stat"><span>Cobros con fecha · sin IVA</span><strong>'+money(r.collected)+'</strong></div>'+
+ '<div class="finance-period-stat"><span>Gastos previstos y registrados · sin IVA</span><strong>'+money(r.expenses)+'</strong></div>'+
+ '<div class="finance-period-stat"><span>De ellos, estimados</span><strong>'+money(r.estimated)+'</strong></div>'+
+ '<div class="finance-period-stat finance-period-result"><span>Resultado</span><strong>'+h(outcome(r.result))+'</strong></div>'+
+ '</article>').join('')+'</div>'+
+ '<p class="finance-small-print">Un 0 € en «cobros con fecha» significa que no hay pagos fechados para ese periodo; no significa que ASSA no haya cobrado. El resultado no es beneficio contable ni saldo bancario.</p></section>'+
  (canWrite?'<section class="panel"><details><summary>Registrar un cobro o una factura de gasto</summary><p>Un registro por pago parcial. Introduce solo el importe recibido y su fecha real. Para gastos, usa fecha de factura. No se cambia la factura ni el cobro acumulado del trabajo.</p><form id="finance-entry"><div class="finance-grid">'+
  '<label>Tipo<select name="type"><option>Cobro</option><option>Gasto</option></select></label>'+input('date','Fecha real','date',true,today)+input('concept','Concepto')+input('party','Cliente o proveedor')+input('reference','Factura / referencia del pago')+
  input('base','Base del movimiento sin IVA','number')+input('vat','IVA del movimiento','number')+input('total','Total del movimiento con IVA','number')+

@@ -129,3 +129,14 @@
 .finance-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.finance-amount{font-size:clamp(1.4rem,3vw,2rem)}
 .finance-scroll{overflow-x:auto}.finance-table{width:100%;border-collapse:collapse;min-width:580px}.finance-table th,.finance-table td{padding:12px;text-align:right;border-bottom:1px solid #dbe5ec}.finance-table th:first-child,.finance-table td:first-child{text-align:left}
 @media(max-width:700px){.finance-cards{grid-template-columns:1fr}.finance-grid{grid-template-columns:1fr}}
+
+/* Finanzas: periodos legibles en móvil, sin tablas de desplazamiento horizontal. */
+.finance-clarification{padding:12px 0;border-top:1px solid #d9e3eb;border-bottom:1px solid #d9e3eb;line-height:1.55}
+.finance-periods{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:16px;margin-top:16px}
+.finance-period{border:1px solid #d9e3eb;border-radius:14px;padding:16px;min-width:0}
+.finance-period h3{margin:0 0 12px;font-size:18px;text-transform:capitalize}
+.finance-period-stat{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;border-top:1px solid #e7edf2;padding:12px 0;line-height:1.45}
+.finance-period-stat span{color:var(--muted);font-size:13px;flex:1 1 130px}
+.finance-period-stat strong{font-size:16px;text-align:right;overflow-wrap:anywhere}
+.finance-period-result strong{font-weight:800}
+.finance-small-print{font-size:13px;color:var(--muted);line-height:1.6}
