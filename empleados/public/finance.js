@@ -21,7 +21,9 @@ export function financeScreen({layout,api,h,toast,today,canWrite}){
  (data.crm.pending.map(x=>'<tr><td>'+h(x.concept)+'</td><td>'+money(x.remaining)+'</td><td>'+h(x.status)+'</td><td>'+h(x.invoice)+'</td></tr>').join('')||'<tr><td colspan="4">No hay deudas identificadas con este criterio.</td></tr>')+
  '</tbody></table></div></details>'+
  '<p><strong>'+data.crm.missingPaymentDates+' trabajos cobrados necesitan desglose de fechas.</strong> No se trasladan automáticamente a la tabla por mes, para no inventar cuándo se recibió el dinero.</p></section>'+
- '<section class="panel" id="finance-reconcile"><h2>Por conciliar · '+data.crm.toReconcile.length+' trabajos</h2>'+
+ '<section class="panel"><h2>Disponible para reinvertir</h2><strong class="finance-amount">No calculable todavía</strong>'+
+ '<p>Faltan extractos bancarios, fechas de los cobros, pagos pendientes a proveedores, impuestos y reserva de seguridad. No se debe usar el resultado estimado para comprometer compras ni reformas.</p></section>'+
+  '<section class="panel" id="finance-reconcile"><h2>Por conciliar · '+data.crm.toReconcile.length+' trabajos</h2>'+
  '<p>Selecciona un trabajo y registra cada abono con su fecha real y evidencia. <strong>No uses la fecha de la factura o de ejecución como fecha de pago.</strong> El importe indicado es el máximo que falta fechar, no necesariamente un único pago.</p>'+
  '<div class="finance-queue">'+(data.crm.toReconcile.map(x=>'<article class="finance-queue-item"><div><strong>'+h(x.concept)+'</strong><p>Factura '+h(x.invoice||'sin vincular')+' · '+money(x.missing)+' por fechar (IVA incl.)</p></div>'+
  (canWrite?'<button type="button" class="button light small" data-reconcile-job="'+h(x.id)+'">Registrar abono</button>':'')+'</article>').join('')||
