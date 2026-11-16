@@ -722,6 +722,8 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
       changes[field]=value;
     }
     if(Object.keys(changes).length===0)throw failure(400,'Completa al menos un coste o importe de venta que hayas verificado.');
+    if(changes['Venta neta sin IVA']!==undefined&&Number(f[F.job.total]||0)>0&&changes['Venta neta sin IVA']>Number(f[F.job.total])+0.01)
+      throw failure(400,'La venta neta supera el total del trabajo. Comprueba la base de la factura.');
     if(changes['Horas reales verificadas (operario-h)']!==undefined){
       const rate=Number(b.hourRate);
       if(!Number.isFinite(rate)||rate<=0||rate>200)throw failure(400,'Confirma un coste por hora válido.');
