@@ -1,0 +1,26 @@
+name: ASSA | Cobros y gastos
+on:
+  push:
+    branches: ['feat/cobros-gastos-20261116']
+  pull_request:
+    branches: ['portal-empleados-v1']
+    paths: ['empleados/**', '.github/workflows/assa-finance.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --omit=dev --no-audit --no-fund
+        working-directory: empleados
+      - run: npm test
+        working-directory: empleados
+      - run: node --check public/finance.js
+        working-directory: empleados
