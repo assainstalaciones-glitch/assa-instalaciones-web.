@@ -15,6 +15,10 @@ test('Los cobros del CRM aparecen como cobrados pero no se asignan a un mes sin 
  assert.equal(d.totals.collected,0);
  assert.equal(d.crm.totals.paid,605);
  assert.equal(d.crm.missingPaymentDates,1);
+ assert.equal(d.crm.unassignedGross,605);
+ assert.equal(d.crm.periodResultComplete,false);
+ assert.equal(d.totals.result,null);
+ assert.equal(d.rows[0].result,null);
  assert.equal(d.crm.pending.length,0);
  assert.equal(d.warnings.length,0);
 });
@@ -68,4 +72,22 @@ test('No se aceptan importes sin desglose ni cobros futuros',()=>{
  assert.equal(validateMovement(base,today)['Total con IVA'],121);
  assert.throws(()=>validateMovement({...base,total:200},today));
  assert.throws(()=>validateMovement({...base,date:'2026-11-20'},today));
+});
+
+test('Un pago parcialmente conciliado deja pendiente sólo el resto y no simula rentabilidad',()=>{
+ const jobId='rec00000000000099';
+ const d=buildFinance([payment('a','2026-11-10',500,{'Trabajo ID':jobId})],[],[{id:jobId,fields:{'Trabajo / referencia':'Parcial antiguo','Importe cobrado':726,'Importe total':726,'Estado':'Terminado'}}],{from:'2026-11-01',to:today,today});
+ assert.equal(d.totals.collected,500);
+ assert.equal(d.crm.unassignedGross,121);
+ assert.equal(d.crm.missingPaymentDates,1);
+ assert.equal(d.totals.result,null);
+});
+test('Cuando están fechados todos los ingresos, el resultado recupera un valor numérico',()=>{
+ const jobId='rec00000000000099';
+ const d=buildFinance([payment('a','2026-11-10',100,{'Trabajo ID':jobId})],fixed,[{id:jobId,fields:{'Trabajo / referencia':'Completado','Importe cobrado':121,'Importe total':121,'Estado':'Terminado'}}],{from:'2026-11-01',to:today,today});
+ assert.equal(d.crm.unassignedGross,0);
+ assert.equal(d.crm.periodResultComplete,true);
+ assert.equal(d.totals.collected,100);
+ assert.equal(d.totals.expenses,160);
+ assert.equal(d.totals.result,-60);
 });
