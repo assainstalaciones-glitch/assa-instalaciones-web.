@@ -79,10 +79,14 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
   const f=j.fields||{},date=String(f['Fecha realizado']||'');
   return !isTestRecord(f)&&date>=from&&date<=to&&['Terminado','Facturado','Pendiente de cobro'].includes(String(f.Estado||''));
  });
- const hasCost=f=>amount(f['Coste material / equipos'])&&amount(f['Otros costes directos'])&&
+ const hasCost=f=>amount(f['Venta neta sin IVA'])&&amount(f['Coste material / equipos'])&&amount(f['Otros costes directos'])&&
   (amount(f['Coste de mano de obra imputado'])||amount(f['Horas reales verificadas (operario-h)']));
  const costCoverage={jobs:completed.length,complete:completed.filter(j=>hasCost(j.fields||{})).length,
-  missing:completed.filter(j=>!hasCost(j.fields||{})).slice(0,40).map(j=>({id:j.id,concept:j.fields?.['Trabajo / referencia']||j.id}))};
+  missing:completed.filter(j=>!hasCost(j.fields||{})).slice(0,40).map(j=>({id:j.id,concept:j.fields?.['Trabajo / referencia']||j.id,
+   expectedRevision:j.fields?.['Última revisión económica']||'',costs:{
+    saleNet:j.fields?.['Venta neta sin IVA']??null,material:j.fields?.['Coste material / equipos']??null,
+    other:j.fields?.['Otros costes directos']??null,hours:j.fields?.['Horas reales verificadas (operario-h)']??null
+   }}))};
  const fixedDetails=fixed.filter(j=>j.fields?.['Incluir en punto equilibrio']).map(j=>({
   id:j.id,concept:label(j.fields),monthly:amount(j.fields?.['Coste mensual equivalente'])?j.fields['Coste mensual equivalente']:null,
   status:String(j.fields?.Estado||'Sin validar'),estimated:j.fields?.Estado!=='Confirmado'
