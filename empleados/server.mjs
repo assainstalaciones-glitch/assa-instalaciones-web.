@@ -749,7 +749,7 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
   if(p==='/api/admin/finance'&&['GET','POST'].includes(method)){
     reqAdmin(user);
     if(user.username!==ROOTUSER)throw failure(403,'Solo la cuenta principal puede consultar o registrar los datos financieros.');
-    const financeJobFields=[F.job.ref,F.job.name,F.job.state,F.job.collected,F.job.invoiceRef,F.job.total,F.job.paymentState,'Fecha realizado','Coste material / equipos','Otros costes directos','Horas reales verificadas (operario-h)','Coste de mano de obra imputado','Venta neta sin IVA','Estado económico validado','Servicio'];
+    const financeJobFields=[F.job.ref,F.job.name,F.job.state,F.job.collected,F.job.invoiceRef,F.job.total,F.job.paymentState,'Fecha realizado','Coste material / equipos','Otros costes directos','Horas reales verificadas (operario-h)','Coste de mano de obra imputado','Venta neta sin IVA','Estado económico validado','Última revisión económica','Servicio'];
     const [movements,fixed,jobs]=await Promise.all([list('finance',LEDGER_FIELDS,10000),list('fixedCosts',FIXED_FIELDS,1000),list('jobs',financeJobFields,3000)]);
     const today=dateMadrid();
     if(method==='GET'){
