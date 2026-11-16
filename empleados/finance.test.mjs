@@ -91,3 +91,26 @@ test('Cuando están fechados todos los ingresos, el resultado recupera un valor 
  assert.equal(d.totals.expenses,160);
  assert.equal(d.totals.result,-60);
 });
+
+test('La cola de conciliación evita asociar cobros a fechas supuestas y disminuye por pagos fechados',()=>{
+ const job='rec00000000000099';
+ const jobs=[{id:job,fields:{'Trabajo / referencia':'Caldera José','Importe cobrado':363,'Importe total':484,'Ref. factura':'001-26','Estado':'Terminado','Estado cobro':'Parcial'}}];
+ const before=buildFinance([],[],jobs,{from:'2026-11-01',to:today,today});
+ assert.deepEqual(before.crm.toReconcile.map(x=>x.missing),[363]);
+ const after=buildFinance([payment('a','2026-11-09',100,{'Trabajo ID':job})],[],jobs,{from:'2026-11-01',to:today,today});
+ assert.equal(after.crm.toReconcile[0].missing,242);
+ assert.equal(after.crm.toReconcile[0].dated,121);
+ assert.equal(after.totals.collected,100);
+ assert.equal(after.totals.result,null);
+});
+test('La información incompleta de materiales y horas se muestra como pendiente, no como beneficio',()=>{
+ const jobs=[
+  {id:'complete',fields:{'Trabajo / referencia':'Completo','Estado':'Terminado','Fecha realizado':'2026-11-10','Coste material / equipos':0,'Otros costes directos':0,'Horas reales verificadas (operario-h)':2}},
+  {id:'incomplete',fields:{'Trabajo / referencia':'Sin costes','Estado':'Terminado','Fecha realizado':'2026-11-10','Importe total':250}},
+  {id:'old',fields:{'Trabajo / referencia':'Antiguo','Estado':'Terminado','Fecha realizado':'2026-10-10'}}
+ ];
+ const data=buildFinance([],[],jobs,{from:'2026-11-01',to:today,today});
+ assert.equal(data.quality.costCoverage.jobs,2);
+ assert.equal(data.quality.costCoverage.complete,1);
+ assert.deepEqual(data.quality.costCoverage.missing.map(x=>x.concept),['Sin costes']);
+});

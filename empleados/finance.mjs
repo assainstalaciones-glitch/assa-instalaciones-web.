@@ -47,7 +47,7 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
  }
  // Estado de cobros por trabajo: vista histórica (IVA incluido) separada del flujo por fechas.
  // No convertir fecha de ejecución o confirmación en fecha bancaria.
- const crmPaid=[],crmPending=[];let missingPaymentDates=0,unassignedGrossCents=0;
+ const crmPaid=[],crmPending=[],toReconcile=[];let missingPaymentDates=0,unassignedGrossCents=0;
  const proposalStatuses=new Set(['Pendiente de visita','Presupuesto pendiente','Presupuesto enviado','Aceptado / Programado','No aceptado / Sin respuesta','Cancelado']);
  for(const j of jobs){
   const f=j.fields||{},status=String(f['Estado']||''),paymentStatus=String(f['Estado cobro']||'');
@@ -57,8 +57,12 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
   const entered=paidByJob.get(j.id)||0;
   const concept=f['Trabajo / referencia']||j.id,invoice=String(f['Ref. factura']||'').trim();
   if(paid>0){
-   crmPaid.push({id:j.id,concept,invoice,paid:paid/100,remaining:total===null?null:Math.max(0,total-paid)/100,partial:total!==null&&paid<total});
-   if(paid>entered){missingPaymentDates++;unassignedGrossCents+=paid-entered;}
+   const unassigned=Math.max(0,paid-entered);
+   crmPaid.push({id:j.id,concept,invoice,paid:paid/100,dated:entered/100,unassigned:unassigned/100,remaining:total===null?null:Math.max(0,total-paid)/100,partial:total!==null&&paid<total});
+   if(unassigned>0){
+    missingPaymentDates++;unassignedGrossCents+=unassigned;
+    toReconcile.push({id:j.id,concept,invoice,paid:paid/100,dated:entered/100,missing:unassigned/100});
+   }
   }
   // Deuda real sólo si hay factura y estado de cobro/trabajo pertinente; nunca presupuestos no ejecutados.
   const due=total!==null&&total>paid&&!!invoice&&(
@@ -69,7 +73,20 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
   if(total!==null&&paid>total)warnings.push({id:j.id,concept,reason:'El importe cobrado supera el total del trabajo; revisar.'});
   if(paymentStatus==='Cobrado'&&paid===0&&total>0)warnings.push({id:j.id,concept,reason:'Estado Cobrado sin importe cobrado; revisar.'});
  }
- crmPaid.sort((a,b)=>b.paid-a.paid);crmPending.sort((a,b)=>b.remaining-a.remaining);
+ crmPaid.sort((a,b)=>b.paid-a.paid);crmPending.sort((a,b)=>b.remaining-a.remaining);toReconcile.sort((a,b)=>b.missing-a.missing);
+ // Visibilidad de las carencias de costes: 0 escrito explícitamente es distinto de campo ausente.
+ const completed=jobs.filter(j=>{
+  const f=j.fields||{},date=String(f['Fecha realizado']||'');
+  return !isTestRecord(f)&&date>=from&&date<=to&&['Terminado','Facturado','Pendiente de cobro'].includes(String(f.Estado||''));
+ });
+ const hasCost=f=>amount(f['Coste material / equipos'])&&amount(f['Otros costes directos'])&&
+  (amount(f['Coste de mano de obra imputado'])||amount(f['Horas reales verificadas (operario-h)']));
+ const costCoverage={jobs:completed.length,complete:completed.filter(j=>hasCost(j.fields||{})).length,
+  missing:completed.filter(j=>!hasCost(j.fields||{})).slice(0,40).map(j=>({id:j.id,concept:j.fields?.['Trabajo / referencia']||j.id}))};
+ const fixedDetails=fixed.filter(j=>j.fields?.['Incluir en punto equilibrio']).map(j=>({
+  id:j.id,concept:label(j.fields),monthly:amount(j.fields?.['Coste mensual equivalente'])?j.fields['Coste mensual equivalente']:null,
+  status:String(j.fields?.Estado||'Sin validar'),estimated:j.fields?.Estado!=='Confirmado'
+ })).sort((a,b)=>(b.monthly||0)-(a.monthly||0));
  const months=new Set();for(let d=from;d<=to;d=next(d))months.add(d.slice(0,7));
  for(const x of fixed){const f=x.fields||{};if(!f['Incluir en punto equilibrio'])continue;
   for(const month of months){
@@ -90,7 +107,12 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
  const sum=k=>k==='result'&&missingPaymentDates>0?null:Math.round(rows.reduce((s,r)=>s+cents(r[k]),0))/100;
  const uniqueWarnings=warnings.filter(w=>{const k=JSON.stringify(w);if(seen.has(k))return false;seen.add(k);return true;});
  return {from,to,group,rows,totals:{collected:sum('collected'),expenses:sum('expenses'),estimated:sum('estimated'),result:sum('result')},warnings:uniqueWarnings,
- crm:{paid:crmPaid,pending:crmPending,totals:{paid:Math.round(crmPaid.reduce((n,x)=>n+cents(x.paid),0))/100,pending:Math.round(crmPending.reduce((n,x)=>n+cents(x.remaining),0))/100},missingPaymentDates,unassignedGross:unassignedGrossCents/100,periodResultComplete:missingPaymentDates===0},
+ crm:{paid:crmPaid,pending:crmPending,toReconcile,totals:{paid:Math.round(crmPaid.reduce((n,x)=>n+cents(x.paid),0))/100,pending:Math.round(crmPending.reduce((n,x)=>n+cents(x.remaining),0))/100},missingPaymentDates,unassignedGross:unassignedGrossCents/100,periodResultComplete:missingPaymentDates===0},
+ quality:{costCoverage,fixedDetails,expenseDocs:events.filter(e=>e.type==='Gasto'&&!e.estimated).length,
+  fixedMissingAmount:fixedDetails.filter(x=>x.monthly===null||x.status==='Falta importe').length,
+  fixedEstimated:fixedDetails.filter(x=>x.estimated).length,
+  datedPayments:valid.filter(x=>!rejected.has(x.id)&&x.fields.Tipo==='Cobro').length,
+  firstReliableDate:from,lastReliableDate:to},
  events:events.filter(e=>!e.estimated).map(e=>({...e,base:e.base/100,vat:e.vat===null?null:e.vat/100,total:e.total===null?null:e.total/100})),
  fixedOptions:fixed.map(x=>({id:x.id,concept:label(x.fields),monthly:x.fields['Coste mensual equivalente']??null})),
  jobOptions:jobs.filter(j=>!isTestRecord(j.fields||{})&&(j.fields?.['Estado']||j.fields?.['Importe cobrado']>0)).map(j=>({id:j.id,concept:j.fields['Trabajo / referencia']||j.id})),
