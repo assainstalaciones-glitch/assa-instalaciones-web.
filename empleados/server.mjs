@@ -978,7 +978,7 @@ const server=http.createServer(async(req,res)=>{let held=[];try{
   if(url.pathname==='/api/admin/finance/job-costs'&&req.method==='POST')keys.push('finance-costs');
   if(keys.some(k=>writingJobs.has(k)))throw failure(409,'Este registro se está guardando. Espera un momento antes de reintentar.');
   held=keys;req.portalLocks=held;for(const key of held)writingJobs.add(key);
-  if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'password-reset-v15'});
+  if(url.pathname==='/health')return json(res,200,{ok:true,configured:!!ready,release:'finance-reinvestment-v6-20261116'});
   if(url.pathname.startsWith('/api/'))return await api(req,res,url);
   return await staticFile(req,res,url.pathname);
 }catch(e){if(!e.status||e.status>=500)console.error('request error',e?.message||e);json(res,e.status||500,{error:e.status?e.message:'Error interno del servidor.'});}finally{for(const key of held)writingJobs.delete(key);}});
