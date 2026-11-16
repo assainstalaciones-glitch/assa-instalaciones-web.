@@ -47,7 +47,7 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
  }
  // Estado de cobros por trabajo: vista histórica (IVA incluido) separada del flujo por fechas.
  // No convertir fecha de ejecución o confirmación en fecha bancaria.
- const crmPaid=[],crmPending=[];let missingPaymentDates=0;
+ const crmPaid=[],crmPending=[];let missingPaymentDates=0,unassignedGrossCents=0;
  const proposalStatuses=new Set(['Pendiente de visita','Presupuesto pendiente','Presupuesto enviado','Aceptado / Programado','No aceptado / Sin respuesta','Cancelado']);
  for(const j of jobs){
   const f=j.fields||{},status=String(f['Estado']||''),paymentStatus=String(f['Estado cobro']||'');
@@ -58,7 +58,7 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
   const concept=f['Trabajo / referencia']||j.id,invoice=String(f['Ref. factura']||'').trim();
   if(paid>0){
    crmPaid.push({id:j.id,concept,invoice,paid:paid/100,remaining:total===null?null:Math.max(0,total-paid)/100,partial:total!==null&&paid<total});
-   if(paid>entered)missingPaymentDates++;
+   if(paid>entered){missingPaymentDates++;unassignedGrossCents+=paid-entered;}
   }
   // Deuda real sólo si hay factura y estado de cobro/trabajo pertinente; nunca presupuestos no ejecutados.
   const due=total!==null&&total>paid&&!!invoice&&(
@@ -86,11 +86,11 @@ export function buildFinance(movements,fixed,jobs,{from,to,group='month',today})
  function bucket(date){if(group==='day')return date;if(group==='month')return date.slice(0,7);const dt=new Date(date+'T00:00:00Z');dt.setUTCDate(dt.getUTCDate()-((dt.getUTCDay()+6)%7));return dt.toISOString().slice(0,10);}
  for(let d=from;d<=to;d=next(d)){const key=bucket(d);if(!buckets.has(key))buckets.set(key,{period:key,collected:0,expenses:0,estimated:0,result:0});}
  for(const e of events){const b=buckets.get(bucket(e.date));if(e.type==='Cobro')b.collected+=e.base;else {b.expenses+=e.base;if(e.estimated)b.estimated+=e.base;}}
- for(const b of buckets.values()){b.result=b.collected-b.expenses;rows.push(Object.fromEntries(Object.entries(b).map(([k,v])=>[k,k==='period'?v:v/100])));}
- const sum=k=>Math.round(rows.reduce((s,r)=>s+cents(r[k]),0))/100;
+ for(const b of buckets.values()){b.result=missingPaymentDates>0?null:b.collected-b.expenses;rows.push(Object.fromEntries(Object.entries(b).map(([k,v])=>[k,k==='period'?v:v===null?null:v/100])));}
+ const sum=k=>k==='result'&&missingPaymentDates>0?null:Math.round(rows.reduce((s,r)=>s+cents(r[k]),0))/100;
  const uniqueWarnings=warnings.filter(w=>{const k=JSON.stringify(w);if(seen.has(k))return false;seen.add(k);return true;});
  return {from,to,group,rows,totals:{collected:sum('collected'),expenses:sum('expenses'),estimated:sum('estimated'),result:sum('result')},warnings:uniqueWarnings,
- crm:{paid:crmPaid,pending:crmPending,totals:{paid:Math.round(crmPaid.reduce((n,x)=>n+cents(x.paid),0))/100,pending:Math.round(crmPending.reduce((n,x)=>n+cents(x.remaining),0))/100},missingPaymentDates},
+ crm:{paid:crmPaid,pending:crmPending,totals:{paid:Math.round(crmPaid.reduce((n,x)=>n+cents(x.paid),0))/100,pending:Math.round(crmPending.reduce((n,x)=>n+cents(x.remaining),0))/100},missingPaymentDates,unassignedGross:unassignedGrossCents/100,periodResultComplete:missingPaymentDates===0},
  events:events.filter(e=>!e.estimated).map(e=>({...e,base:e.base/100,vat:e.vat===null?null:e.vat/100,total:e.total===null?null:e.total/100})),
  fixedOptions:fixed.map(x=>({id:x.id,concept:label(x.fields),monthly:x.fields['Coste mensual equivalente']??null})),
  jobOptions:jobs.filter(j=>!isTestRecord(j.fields||{})&&(j.fields?.['Estado']||j.fields?.['Importe cobrado']>0)).map(j=>({id:j.id,concept:j.fields['Trabajo / referencia']||j.id})),
