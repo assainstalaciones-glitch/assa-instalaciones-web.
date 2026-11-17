@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import * as calendar from './public/calendar.js';
+import { ASSA_TEAMS } from './public/team-planning.js';
 import * as outcomes from './public/outcomes.js';
 import {changedJobFields} from './public/edit-fields.js';
 import * as relationships from './public/relationships.js';
@@ -14,7 +15,7 @@ test('Restablecer desde enlace borra el fragmento y valida confirmación antes d
  const nodes=new Map(),listeners=new Map();
  const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',dataset:{},className:'',disabled:false,addEventListener(type,fn){listeners.set(id+':'+type,fn);},querySelector:x=>node(x),querySelectorAll:()=>[],reset(){}});return nodes.get(id);};
  let values={password:'nueva-segura-2026',confirmation:'distinta-segura-2026'},requests=[],replaced;
- const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},location:{hash:'#restablecer=token-simulado',pathname:'/',search:''},history:{replaceState(...args){replaced=args;}},fetch:async(path,opts)=>{requests.push({path,data:JSON.parse(opts.body)});return {ok:true,json:async()=>({ok:true})};},FormData:class {entries(){return Object.entries(values)[Symbol.iterator]();}},...recovery,...calendar,...outcomes,...relationships,changedJobFields,fifteenDayRange});
+ const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},location:{hash:'#restablecer=token-simulado',pathname:'/',search:''},history:{replaceState(...args){replaced=args;}},fetch:async(path,opts)=>{requests.push({path,data:JSON.parse(opts.body)});return {ok:true,json:async()=>({ok:true})};},FormData:class {entries(){return Object.entries(values)[Symbol.iterator]();}},...recovery,...calendar,ASSA_TEAMS,...outcomes,...relationships,changedJobFields,fifteenDayRange});
  const code=readFileSync(new URL('./public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/init\(\);\s*$/,'');
  vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={init};",context);
  await context.ui.init();assert.equal(replaced[2],'/');assert.match(node('#app').innerHTML,/Elige tu nueva contraseña/);
@@ -28,7 +29,7 @@ test('Restablecer desde enlace borra el fragmento y valida confirmación antes d
 
 test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>{
   const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',addEventListener(){},querySelector:x=>node(x),querySelectorAll:()=>[],getContext:()=>({fillRect(){}})});return nodes.get(id);};
-  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},FormData:class {entries(){return [][Symbol.iterator]();}},...recovery,...calendar,...outcomes,...relationships,changedJobFields,fifteenDayRange});
+  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},FormData:class {entries(){return [][Symbol.iterator]();}},...recovery,...calendar,ASSA_TEAMS,...outcomes,...relationships,changedJobFields,fifteenDayRange});
   const code=readFileSync(new URL('./public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/init\(\);\s*$/,'');
   vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={state,renderAgenda,renderDashboard,renderWork,renderSign,renderDirectionEdit,renderJobs,renderToday};",context);
   const ui=context.ui,app=node('#app');
