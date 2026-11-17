@@ -50,8 +50,8 @@ function occupancy(jobs){
   return {busyMinutes:busy,freeMinutes:Math.max(0,DAILY_CAPACITY_MINUTES-busy),unknown,conflicts,
     outsideHours:spans.filter(s=>s.start<CAPACITY_WINDOWS[0][0]||s.end>CAPACITY_WINDOWS.at(-1)[1])};
 }
-export function buildTeamWeek(jobs,monday,today){
-  const days=Array.from({length:5},(_,i)=>({date:addDaysISO(monday,i),teams:ASSA_TEAMS.map(t=>({...t,jobs:[]})),unassigned:[]}));
+export function buildTeamWeek(jobs,monday,today,agendaNotes=[]){
+  const days=Array.from({length:5},(_,i)=>({date:addDaysISO(monday,i),teams:ASSA_TEAMS.map(t=>({...t,jobs:[]})),unassigned:[],commercial:[]}));
   const dates=new Map(days.map(d=>[d.date,d]));
   const active=(jobs||[]).filter(j=>OPEN_STATUSES.includes(j.status)&&!/^\s*(?:PRUEBA|TEST|SIMULACI)/i.test(j.reference||''));
   for(const job of active){
@@ -59,8 +59,14 @@ export function buildTeamWeek(jobs,monday,today){
     const group=day.teams.find(t=>t.id===job.team);
     (group?group.jobs:day.unassigned).push(job);
   }
+  for(const note of agendaNotes||[]){
+    const day=dates.get(note.date);
+    if(day&&note.status!=='Cancelada'&&String(note.notes||'').includes('[SAMUEL-COMERCIAL]'))day.commercial.push(note);
+  }
   for(const day of days){
-    day.teams.forEach(t=>{t.jobs.sort((a,b)=>(a.start||'99:99').localeCompare(b.start||'99:99'));Object.assign(t,occupancy(t.jobs));});
+    day.teams.forEach(t=>{t.jobs.sort((a,b)=>(a.start||'99:99').localeCompare(b.start||'99:99'));
+      const planned=t.id===ASSA_TEAMS[0].id?[...t.jobs,...day.commercial]:t.jobs;
+      Object.assign(t,occupancy(planned));});
     day.unassigned.sort((a,b)=>(a.start||'99:99').localeCompare(b.start||'99:99'));
   }
   const overdue=active.filter(j=>j.date&&j.date<today).sort((a,b)=>a.date.localeCompare(b.date));
