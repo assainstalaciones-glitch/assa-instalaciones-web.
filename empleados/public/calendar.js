@@ -2,6 +2,12 @@ export const OPEN_STATUSES=['Aceptado / Programado','En progreso','Pendiente de 
 export function madridToday(){return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
 export function validTime(value){return typeof value==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(value);}
 export function assignedUsers(value){return String(value||'').toLowerCase().split(/[,;\n]/).map(x=>x.trim()).filter(Boolean);}
+export function plannedUsers(job){
+ const crew=job?.team||'';
+ if(crew==='Equipo 1 · Samuel + César')return ['samuel','cesar'];
+ if(crew==='Equipo 2 · Alex + Saúl')return ['alex','saul'];
+ return assignedUsers(job?.assigned);
+}
 export function overlap(a,b){
  if(!validTime(a.start)||!validTime(b.start))return false;
  if(!a.end&&!b.end)return a.start===b.start;
@@ -17,7 +23,9 @@ export function calendarCells(month){
 }
 export function shiftMonth(month,delta){const [y,m]=month.split('-').map(Number);return new Date(Date.UTC(y,m-1+delta,1)).toISOString().slice(0,7);}
 export function dailyGaps(jobs,user,start='08:00',end='18:00'){
- const assigned=jobs.filter(j=>OPEN_STATUSES.includes(j.status)&&assignedUsers(j.assigned).includes(user));
+ const active=jobs.filter(j=>OPEN_STATUSES.includes(j.status));
+ if(active.some(j=>!plannedUsers(j).length))return {unknown:true,gaps:[]};
+ const assigned=active.filter(j=>plannedUsers(j).includes(user));
  if(assigned.some(j=>!validTime(j.start)||!validTime(j.end)||j.start>=j.end))return {unknown:true,gaps:[]};
  const spans=assigned.filter(j=>j.end>start&&j.start<end).sort((a,b)=>a.start.localeCompare(b.start));
  let cursor=start;const gaps=[];
