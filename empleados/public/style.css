@@ -193,3 +193,7 @@
  .team-assign-actions select,.team-assign-actions button{width:100%}
  .team-overdue{align-items:flex-start;flex-direction:column;gap:5px}
 }
+
+.team-commercial{background:#e8f5f0;border:1px solid #9bd8c3;border-radius:10px;padding:11px;font-size:12px}
+.team-commercial strong{display:block;line-height:1.4}
+.team-commercial p{margin:5px 0 0;color:var(--muted)}
