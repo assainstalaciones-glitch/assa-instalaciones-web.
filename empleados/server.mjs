@@ -18,6 +18,7 @@ import { createSignedWorkPdf } from './signed-pdf.mjs';
 import { buildCommercialOT } from './ot-commercial.mjs';
 import { confirmedBudget, prepareOtFields } from './ot-sync.mjs';
 import { buildAdminDashboard } from './admin-dashboard.mjs';
+import { ASSA_TEAMS } from './public/team-planning.js';
 import { buildReconciliationView } from './reconciliation-view.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -31,7 +32,7 @@ const ROOTHASH = process.env.BOOTSTRAP_PASSWORD_HASH || '';
 const ready = TOKEN.startsWith('pat') && SECRET.length >= 32 && ROOTUSER && ROOTHASH.startsWith('scrypt$');
 const ACTIVE = new Set(['Aceptado / Programado', 'En progreso', 'Pendiente de visita']);
 const F = {
-  job:{ ...REL_FIELDS, installationMode:I.mode, installationUnits:I.units, executedOn:I.executedOn, ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado', audit:AUDIT_FIELD, outcome:OUTCOME_FIELD },
+  job:{ ...REL_FIELDS, installationMode:I.mode, installationUnits:I.units, executedOn:I.executedOn, ref:'Trabajo / referencia', name:'Nombre del Cliente', address:'Dirección', mapsAddress:'Dirección para Maps', phone:'Número de teléfono', email:'Correo electrónico', budget:'Nº presupuesto', total:'Importe total', service:'Servicio', desc:'Descripción del trabajo', date:'Fecha prevista', start:'Hora inicio prevista (portal)', end:'Hora fin prevista (portal)', state:'Estado', assigned:'Operarios asignados portal', team:'Equipo responsable ASSA', client:'Cliente', invoiceRef:'Ref. factura', collected:'Importe cobrado', paymentState:'Estado cobro', invoiceSent:'Factura enviada (portal)', paymentConfirmed:'Cobro confirmado (portal)', invoiceSentAt:'Fecha confirmación envío factura (portal)', paymentConfirmedAt:'Fecha confirmación cobro (portal)', completedOn:'Fecha realizado', audit:AUDIT_FIELD, outcome:OUTCOME_FIELD },
   client:{name:'Nombre',phone:'Teléfono',email:'Email',address:'Dirección'},
   user:{username:'Usuario',name:'Nombre',hash:'Hash contraseña',role:'Rol',active:'Activo'},
   report:{ref:'Referencia',job:'Trabajo',user:'Usuario operario',hours:'Horas reales',actualStart:'Hora entrada real (portal)',actualEnd:'Hora salida real (portal)',material:'Material utilizado',notes:'Observaciones',date:'Fecha trabajo',photos:'Fotos',done:'Finalizado',closed:'Fecha cierre'},
@@ -77,11 +78,18 @@ async function identify(req){const raw=(req.headers.cookie||'').split(';').map(s
 }
 function reqAuth(user){if(!user)throw failure(401,'Accede con tu usuario y contraseña.');}
 function reqAdmin(user){reqAuth(user);if(user.role!=='administrador')throw failure(403,'Solo administración puede realizar esta acción.');}
-function teamCanAccess(job,user){return user.role==='administrador'||(user.role==='tecnico'&&ACTIVE.has(job.fields[F.job.state]));}
+function teamCanAccess(job,user){
+  if(user.role==='administrador')return true;
+  if(user.role!=='tecnico'||!ACTIVE.has(job.fields[F.job.state]))return false;
+  const team=job.fields[F.job.team]||'';
+  if(team===ASSA_TEAMS[0].id)return ASSA_TEAMS[0].users.includes(user.username);
+  if(team===ASSA_TEAMS[1].id)return ASSA_TEAMS[1].users.includes(user.username);
+  return true; // Trabajos históricos sin equipo confirmado siguen visibles para evitar pérdidas.
+}
 async function authorizedJob(id,user){reqAuth(user);const job=await getOne('jobs',id);if(!teamCanAccess(job,user))throw failure(403,'Este trabajo no está abierto para el equipo.');if(user.role!=='administrador'){const orders=await list('orders',[F.order.job,F.order.internal,F.order.state,F.order.pdf],3000);if(orders.some(o=>signedPendingClosure(o,id)))throw failure(403,'El parte firmado está pendiente de revisión por dirección.');}return job;}
 function signedPendingClosure(order,jobId){return (order.fields[F.order.job]||[]).includes(jobId)&&order.fields[F.order.state]==='Firmado / archivado'&&!!order.fields[F.order.pdf]?.length&&reviewEvent(order)?.state==='pending';}
 function freeAgendaView(record){const f=record.fields;return {id:record.id,title:f[F.freeAgenda.title]||'',date:f[F.freeAgenda.date]||'',start:f[F.freeAgenda.start]||'',end:f[F.freeAgenda.end]||'',kind:f[F.freeAgenda.kind]||'Cita libre',location:f[F.freeAgenda.location]||'',notes:f[F.freeAgenda.notes]||'',status:f[F.freeAgenda.status]||'Activa'};}
-function jobView(record,admin){const f=record.fields;const data={partnerInstallation:f[I.mode]===INSTALLATION_MODE,installationUnits:f[I.units]??null,executedOn:f[I.executedOn]||'',...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:(f[I.mode]===INSTALLATION_MODE&&f[REL_FIELDS.partnerName])||f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||''};if(admin){data.clientId=(f[F.job.client]||[])[0]||'';data.economics=economicsView(f);}return data;}
+function jobView(record,admin){const f=record.fields;const data={partnerInstallation:f[I.mode]===INSTALLATION_MODE,installationUnits:f[I.units]??null,executedOn:f[I.executedOn]||'',...relationshipView(f,admin),id:record.id,reference:f[F.job.ref]||'',client:(f[I.mode]===INSTALLATION_MODE&&f[REL_FIELDS.partnerName])||f[F.job.name]||'',address:f[F.job.address]||'',mapsAddress:f[F.job.mapsAddress]||'',phone:f[F.job.phone]||'',description:f[F.job.desc]||'',date:f[F.job.date]||'',start:f[F.job.start]||'',end:f[F.job.end]||'',status:f[F.job.state]||'',outcome:f[F.job.outcome]||'',assigned:f[F.job.assigned]||'',team:f[F.job.team]||''};if(admin){data.clientId=(f[F.job.client]||[])[0]||'';data.economics=economicsView(f);}return data;}
 async function otJobData(job,order){
   const j=job.fields||{},o=order?.fields||{};
   let cl={};
@@ -366,6 +374,24 @@ async function api(req,res,url){const method=req.method;const p=url.pathname; if
     savedEvent.state='applied';savedEvent.appliedAt=new Date().toISOString();await patch('jobs',job.id,{[AUDIT_FIELD]:writeAudit(currentAudit)});
     const verified=await getOne('jobs',job.id);if(!readAudit(verified).some(e=>e.id===event.id&&e.state==='applied'))throw failure(409,'No se ha podido verificar la auditoría.');
     return json(res,200,{ok:true,notice:event.reportMode==='annotation'?'Rectificación añadida al historial. El parte cerrado y su PDF original se conservan.':'Corrección de dirección guardada con historial. No se ha cambiado el estado del trabajo.'});
+  }
+  const teamMatch=p.match(/^\/api\/admin\/jobs\/(rec[A-Za-z0-9]{14})\/team$/);
+  if(teamMatch&&method==='PATCH'){
+    reqAdmin(user);
+    if(user.username!==ROOTUSER)throw failure(403,'Solo la dirección principal puede asignar equipos.');
+    const b=await requestBody(req);
+    if(typeof b.team!=='string'||typeof b.expectedTeam!=='string'||!['',...ASSA_TEAMS.map(t=>t.id)].includes(b.team))
+      throw failure(400,'Selecciona un equipo válido o deja el trabajo sin asignar.');
+    const job=await getOne('jobs',teamMatch[1]);
+    if(!ACTIVE.has(job.fields[F.job.state]))throw failure(409,'Solo se pueden asignar equipos a trabajos abiertos.');
+    const previous=String(job.fields[F.job.team]||'');
+    if(previous!==b.expectedTeam)throw failure(409,'Otro cambio ha actualizado el equipo. Refresca antes de guardar.');
+    if(previous===b.team)return json(res,200,{ok:true,unchanged:true,team:previous,notice:'El equipo ya estaba guardado.'});
+    await patch('jobs',job.id,{[F.job.team]:b.team||null});
+    const saved=await getOne('jobs',job.id);
+    if(String(saved.fields[F.job.team]||'')!==b.team)
+      throw failure(502,'No se pudo verificar el reparto guardado. Revisa Airtable antes de reintentar.');
+    return json(res,200,{ok:true,team:b.team,notice:'Equipo responsable actualizado y verificado en Airtable. No se han modificado fechas, partes ni facturas.'});
   }
   const scheduleMatch=p.match(/^\/api\/jobs\/(rec[A-Za-z0-9]{14})\/schedule$/);
   if(scheduleMatch&&method==='PATCH'){
