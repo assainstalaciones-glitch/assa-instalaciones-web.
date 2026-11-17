@@ -1,0 +1,31 @@
+name: ASSA | Validación de nuevas funciones del portal
+on:
+  pull_request:
+    branches:
+      - portal-empleados-v1
+    paths:
+      - 'empleados/**'
+      - '.github/workflows/assa-equipos-pr.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portal-tests:
+    name: Node.js · pruebas del portal
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Descargar cambios propuestos
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar dependencias
+        working-directory: empleados
+        run: npm install --omit=dev --no-audit --no-fund
+      - name: Validar sintaxis, roles, agenda, importes y planificación
+        working-directory: empleados
+        run: npm test

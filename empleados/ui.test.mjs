@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import * as calendar from './public/calendar.js';
+import { ASSA_TEAMS } from './public/team-planning.js';
+import { renderTechnicianWork } from './public/technician-view.js';
 import * as outcomes from './public/outcomes.js';
 import {changedJobFields} from './public/edit-fields.js';
 import * as relationships from './public/relationships.js';
@@ -14,7 +16,7 @@ test('Restablecer desde enlace borra el fragmento y valida confirmación antes d
  const nodes=new Map(),listeners=new Map();
  const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',dataset:{},className:'',disabled:false,addEventListener(type,fn){listeners.set(id+':'+type,fn);},querySelector:x=>node(x),querySelectorAll:()=>[],reset(){}});return nodes.get(id);};
  let values={password:'nueva-segura-2026',confirmation:'distinta-segura-2026'},requests=[],replaced;
- const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},location:{hash:'#restablecer=token-simulado',pathname:'/',search:''},history:{replaceState(...args){replaced=args;}},fetch:async(path,opts)=>{requests.push({path,data:JSON.parse(opts.body)});return {ok:true,json:async()=>({ok:true})};},FormData:class {entries(){return Object.entries(values)[Symbol.iterator]();}},...recovery,...calendar,...outcomes,...relationships,changedJobFields,fifteenDayRange});
+ const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},location:{hash:'#restablecer=token-simulado',pathname:'/',search:''},history:{replaceState(...args){replaced=args;}},fetch:async(path,opts)=>{requests.push({path,data:JSON.parse(opts.body)});return {ok:true,json:async()=>({ok:true})};},FormData:class {entries(){return Object.entries(values)[Symbol.iterator]();}},...recovery,...calendar,ASSA_TEAMS,renderTechnicianWork,...outcomes,...relationships,changedJobFields,fifteenDayRange});
  const code=readFileSync(new URL('./public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/init\(\);\s*$/,'');
  vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={init};",context);
  await context.ui.init();assert.equal(replaced[2],'/');assert.match(node('#app').innerHTML,/Elige tu nueva contraseña/);
@@ -28,7 +30,7 @@ test('Restablecer desde enlace borra el fragmento y valida confirmación antes d
 
 test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>{
   const nodes=new Map();const node=id=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',addEventListener(){},querySelector:x=>node(x),querySelectorAll:()=>[],getContext:()=>({fillRect(){}})});return nodes.get(id);};
-  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},FormData:class {entries(){return [][Symbol.iterator]();}},...recovery,...calendar,...outcomes,...relationships,changedJobFields,fifteenDayRange});
+  const context=vm.createContext({document:{querySelector:node},console,setTimeout,clearTimeout,Intl,Date,crypto:{randomUUID},FormData:class {entries(){return [][Symbol.iterator]();}},...recovery,...calendar,ASSA_TEAMS,renderTechnicianWork,...outcomes,...relationships,changedJobFields,fifteenDayRange});
   const code=readFileSync(new URL('./public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/init\(\);\s*$/,'');
   vm.runInContext("const mapsDestination=(a,b)=>b||a;\n"+code+"\nglobalThis.ui={state,renderAgenda,renderDashboard,renderWork,renderSign,renderDirectionEdit,renderJobs,renderToday};",context);
   const ui=context.ui,app=node('#app');
@@ -52,9 +54,9 @@ test('Pantallas de dirección, agenda y parte conservan acceso y contactos',()=>
   ui.state.directionEdit={job:{...job,status:'Presupuesto pendiente'},reports:[{id:'rec00000000000004',user:'saul',hours:1,notes:'Diagnóstico',date:'2026-11-05',material:'Material original'}],history:[],version:'test'};
   ui.renderDirectionEdit();assert.match(app.innerHTML,/Presupuesto pendiente/);assert.match(app.innerHTML,/Material original/);assert.match(app.innerHTML,/Motivo de la corrección/);assert.doesNotMatch(app.innerHTML,/editReportHours[^>]*disabled/);
   ui.state.me={username:'saul',role:'tecnico'};ui.renderAgenda();assert.doesNotMatch(app.innerHTML,/data-nav="dashboard"/);assert.doesNotMatch(app.innerHTML,/agendaTech/);
-  ui.renderWork();assert.doesNotMatch(app.innerHTML,/saveAssign/);assert.match(app.innerHTML,/Terminar y firmar/);assert.match(app.innerHTML,/Guardar sin finalizar/);assert.match(app.innerHTML,/Cambiar fecha de la jornada/);assert.match(app.innerHTML,/name="date" value=/);assert.match(app.innerHTML,/comunicar incidencia o siguiente paso/);
+  ui.renderWork();assert.doesNotMatch(app.innerHTML,/saveAssign/);assert.match(app.innerHTML,/Hoja de ruta/);assert.match(app.innerHTML,/Trabajo a realizar/);assert.match(app.innerHTML,/tel:600123456/);assert.match(app.innerHTML,/google.com\/maps/);assert.doesNotMatch(app.innerHTML,/Terminar y firmar|Guardar sin finalizar|Fotografías del trabajo/);
   ui.state.me={username:'samuel',role:'administrador',name:'Samuel',canManageRecords:true};ui.state.viewMode='instalador';ui.state.job={...job,assigned:'samuel'};
-  ui.renderWork();assert.match(app.innerHTML,/Terminar y firmar/);assert.match(app.innerHTML,/data-switch-mode/);assert.match(app.innerHTML,/Volver a Dirección/);assert.doesNotMatch(app.innerHTML,/Editar trabajo y parte/);assert.doesNotMatch(app.innerHTML,/Guardar planificación/);assert.doesNotMatch(app.innerHTML,/Costes del trabajo/);
+  ui.renderWork();assert.match(app.innerHTML,/Hoja de ruta/);assert.match(app.innerHTML,/data-switch-mode/);assert.match(app.innerHTML,/Volver a Dirección/);assert.doesNotMatch(app.innerHTML,/Editar trabajo y parte/);assert.doesNotMatch(app.innerHTML,/Guardar planificación/);assert.doesNotMatch(app.innerHTML,/Costes del trabajo/);
   ui.state.jobs=[{...job,id:'rec00000000000011',assigned:'saul'},{...job,id:'rec00000000000012',assigned:'samuel',client:'Trabajo Samuel'}];ui.renderJobs();assert.match(app.innerHTML,/Trabajo Samuel/);assert.doesNotMatch(app.innerHTML,/Cliente &lt;prueba&gt;/);assert.match(app.innerHTML,/Ver otros trabajos abiertos/);
   ui.state.showAllTechnicianJobs=true;ui.renderJobs();assert.match(app.innerHTML,/Cliente &lt;prueba&gt;/);
   ui.state.viewMode='direccion';ui.state.showAllTechnicianJobs=false;ui.renderWork();assert.match(app.innerHTML,/Editar trabajo y parte/);assert.match(app.innerHTML,/Guardar planificación/);

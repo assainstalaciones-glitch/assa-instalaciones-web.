@@ -313,6 +313,30 @@ test('Flujo HTTP completo con Airtable simulado; nunca usa datos reales',async t
      assert.equal((await call('/jobs/'+r.data.job.id+'/schedule','saul','PATCH',{})).status,403);
      assert.equal((await call('/admin/jobs/'+r.data.job.id+'/confirm','alex','PATCH',{field:'paymentConfirmed',checked:true})).status,403);
    });
+
+  await t.test('Equipo responsable: solo Samuel asigna, valida concurrencia y filtra acceso técnico',async()=>{
+    const entry=tables.tblsVLKBSafEEiUlI.find(x=>x.fields['Nombre del Cliente']==='Cliente prueba equipo');
+    assert.ok(entry);
+    const path='/admin/jobs/'+entry.id+'/team';
+    const b={team:'Equipo 2 · Alex + Saúl',expectedTeam:''};
+    const before=writes.length;
+    assert.equal((await call(path,'saul','PATCH',b)).status,403);
+    assert.equal((await call(path,'samuel','PATCH',{team:'Inexistente',expectedTeam:''})).status,400);
+    assert.equal((await call(path,'samuel','PATCH',{...b,expectedTeam:'Otro equipo'})).status,409);
+    assert.equal(writes.length,before);
+    const first=await call(path,'samuel','PATCH',b);assert.equal(first.status,200,JSON.stringify(first.data));
+    assert.equal(entry.fields['Equipo responsable ASSA'],b.team);
+    assert.deepEqual(Object.keys(writes.at(-1).fields),['Equipo responsable ASSA']);
+    assert.equal((await call(path,'samuel','PATCH',b)).status,409);
+    assert.equal((await call('/jobs/'+entry.id,'alex')).status,200);
+    assert.equal((await call('/jobs/'+entry.id,'saul')).status,200);
+    const next=await call(path,'samuel','PATCH',{team:'Equipo 1 · Samuel + César',expectedTeam:b.team});
+    assert.equal(next.status,200);
+    assert.equal((await call('/jobs/'+entry.id,'alex')).status,403);
+    assert.equal((await call('/jobs/'+entry.id,'saul')).status,403);
+    assert.equal((await call('/jobs/'+entry.id,'samuel')).status,200);
+    assert.equal(entry.fields['Importe cobrado'],undefined);
+  });
    await t.test('Desactivar técnico revoca acceso; rol desconocido no autentica',async()=>{
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=false;assert.equal((await call('/me')).status,401);
     tables.tblZURy4PjvmL1Kr0[0].fields.Activo=true;tables.tblZURy4PjvmL1Kr0[0].fields.Rol='desconocido';assert.equal((await call('/me')).status,401);
