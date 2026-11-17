@@ -156,3 +156,40 @@
 #finance-cost-entry{scroll-margin-top:170px}
 #finance-cost-entry textarea{min-height:100px;resize:vertical}
 #finance-cost-entry .button{min-width:190px}
+
+
+/* Planificación de equipos ASSA: solo Dirección, sin modificar la vista financiera */
+.team-week-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;justify-content:space-between;margin-bottom:18px}
+.team-week-toolbar strong{font-size:15px}
+.team-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.team-column{min-width:0;border:1px solid var(--border);border-radius:13px;padding:13px;background:#fff;display:flex;flex-direction:column;gap:12px}
+.team-column-head{border-bottom:1px solid var(--border);padding:3px 2px 12px}
+.team-column-head strong{display:block;font-size:17px;color:var(--navy)}
+.team-column-head>span{font-size:13px;color:var(--muted)}
+.team-column-head p{margin:7px 0}
+.team-meter{height:8px;background:#e9eff3;overflow:hidden;border-radius:12px}
+.team-meter span{height:100%;display:block;border-radius:12px;background:#159d85;transition:width .2s}
+.team-job{border-radius:11px;padding:12px;background:#f5f8fa;border:1px solid #e2e9ee;display:grid;gap:7px;min-width:0}
+.team-job strong{display:block;line-height:1.35;overflow-wrap:anywhere}
+.team-job p{font-size:12px;color:var(--muted);margin:0;line-height:1.4;overflow-wrap:anywhere}
+.team-job-head{display:flex;gap:6px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:12px;font-weight:750}
+.team-job .team-job-actions{display:flex;gap:6px}
+.team-assign-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.team-assign-actions select{min-width:140px;flex:1;max-width:100%;border:1px solid #ced9e3;padding:9px;border-radius:8px;background:#fff;font-size:13px}
+.team-alert{color:#ae3d1b;background:#fff1e7;border:1px solid #ffd0b9;padding:9px 10px;border-radius:9px;font-size:13px;margin:0}
+.team-unassigned{margin-top:16px;padding:12px;background:#fff5df;border:1px solid #e4d4aa;border-radius:11px;display:grid;gap:10px}
+.team-unassigned h3{margin:0;font-size:16px}
+.team-unassigned>p{margin:0}
+.team-blank{padding:8px 2px;margin:0}
+.team-overdue{display:flex;gap:12px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding:10px 0}
+.team-overdue>span{font-size:12px;color:var(--muted)}
+.team-day>.section-head{margin-bottom:15px}
+@media(max-width:760px){
+ .team-grid{grid-template-columns:1fr}
+ .team-week-toolbar{justify-content:center}
+ .team-week-toolbar strong{width:100%;text-align:center;order:-1}
+ .team-column{padding:11px}
+ .team-assign-actions{flex-direction:column;align-items:stretch}
+ .team-assign-actions select,.team-assign-actions button{width:100%}
+ .team-overdue{align-items:flex-start;flex-direction:column;gap:5px}
+}
