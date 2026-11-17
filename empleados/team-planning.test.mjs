@@ -49,3 +49,22 @@ test('trabajos de prueba y cancelados no contaminan la capacidad',()=>{
   assert.equal(data.days[2].teams[0].jobs.length,0);
   assert.equal(data.days[2].teams[0].freeMinutes,510);
 });
+
+test('bloques comerciales registrados de Samuel reducen solo la capacidad del equipo 1',()=>{
+ const notes=[{date:'2026-11-20',start:'15:00',end:'17:00',status:'Activa',title:'Presupuestos Samuel',notes:'[SAMUEL-COMERCIAL] Fuente Calendar'}];
+ const data=buildTeamWeek([],'2026-11-16','2026-11-17',notes);
+ const fri=data.days[4];
+ assert.equal(fri.commercial.length,1);
+ assert.equal(fri.teams[0].busyMinutes,120);
+ assert.equal(fri.teams[0].freeMinutes,390);
+ assert.equal(fri.teams[1].busyMinutes,0);
+});
+test('bloques cancelados u otros recordatorios no bloquean al equipo',()=>{
+ const notes=[
+ {date:'2026-11-20',start:'15:00',end:'17:00',status:'Cancelada',notes:'[SAMUEL-COMERCIAL]'},
+ {date:'2026-11-20',start:'09:00',end:'10:00',status:'Activa',notes:'Otro recordatorio'}
+ ];
+ const data=buildTeamWeek([],'2026-11-16','2026-11-17',notes);
+ assert.equal(data.days[4].commercial.length,0);
+ assert.equal(data.days[4].teams[0].busyMinutes,0);
+});
