@@ -197,3 +197,10 @@
 .team-commercial{background:#e8f5f0;border:1px solid #9bd8c3;border-radius:10px;padding:11px;font-size:12px}
 .team-commercial strong{display:block;line-height:1.4}
 .team-commercial p{margin:5px 0 0;color:var(--muted)}
+
+/* Hoja de ruta para técnicos: información grande, clara y legible en Android. */
+.tech-route-row{display:grid;grid-template-columns:minmax(85px,125px) minmax(0,1fr);gap:12px;padding:11px 0;border-bottom:1px solid var(--border)}
+.tech-route-row strong{font-size:13px;color:var(--muted)}
+.tech-route-row span{font-size:14px;font-weight:650;overflow-wrap:anywhere}
+.tech-instructions{font-size:16px;line-height:1.65;white-space:pre-line}
+@media(max-width:580px){.tech-route-row{grid-template-columns:1fr;gap:2px}.tech-instructions{font-size:15px}}
