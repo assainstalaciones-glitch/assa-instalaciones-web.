@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {calendarCells,shiftMonth,overlap,dailyGaps,validTime} from './public/calendar.js';
+import {calendarCells,shiftMonth,overlap,dailyGaps,validTime,plannedUsers} from './public/calendar.js';
 test('Mes de 42 casillas, lunes primero, años bisiestos y cambio de año',()=>{
  const cells=calendarCells('2028-02');assert.equal(cells.length,42);assert.equal(cells[0].date,'2028-01-31');assert.ok(cells.some(c=>c.date==='2028-02-29'&&c.inMonth));
  assert.equal(shiftMonth('2026-12',1),'2027-01');assert.equal(shiftMonth('2026-01',-1),'2025-12');assert.deepEqual(calendarCells('2026-13'),[]);
@@ -20,4 +20,13 @@ test('Una reserva sin hora impide presentar disponibilidad como comprobada',()=>
  assert.equal(overlap({start:'09:00',end:''},{start:'09:00',end:''}),true);
  assert.equal(overlap({start:'10:00',end:''},{start:'09:00',end:'11:00'}),true);
  assert.equal(overlap({start:'09:00',end:''},{start:'11:00',end:''}),false);
+});
+
+test('Equipos completos visibles por usuario y los trabajos sin reparto invalidan capacidad disponible',()=>{
+ const e1={team:'Equipo 1 · Samuel + César',status:'Aceptado / Programado',start:'09:00',end:'11:00'};
+ const e2={team:'Equipo 2 · Alex + Saúl',status:'Aceptado / Programado',start:'10:00',end:'12:00'};
+ assert.deepEqual(plannedUsers(e1),['samuel','cesar']);
+ assert.deepEqual(plannedUsers(e2),['alex','saul']);
+ assert.equal(dailyGaps([e1,e2],'alex').unknown,false);
+ assert.equal(dailyGaps([e1,e2,{status:'Aceptado / Programado',start:'13:00',end:'15:00'}],'alex').unknown,true);
 });
